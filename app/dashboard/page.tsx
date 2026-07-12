@@ -62,6 +62,7 @@ export default function DashboardPage() {
 
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<any>(null);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -70,9 +71,12 @@ export default function DashboardPage() {
         const json = await res.json();
         if (json.success) {
           setData(json);
+        } else {
+          setError(true);
         }
-      } catch (error) {
-        console.error('Failed to load dashboard data:', error);
+      } catch (err) {
+        console.error('Failed to load dashboard data:', err);
+        setError(true);
       } finally {
         setLoading(false);
       }
@@ -80,13 +84,27 @@ export default function DashboardPage() {
     fetchData();
   }, []);
 
-  if (loading || !data) {
+  if (loading || (!data && !error)) {
     return (
       <DashboardLayout>
         <PageHeader title="Dashboard" description={`Welcome back, ${user?.name?.split(' ')[0]}. Loading your fleet data...`} />
         <Card className="flex flex-col items-center justify-center min-h-[500px]">
           <Loader2 className="w-8 h-8 animate-spin text-primary mb-3" />
           <p className="text-sm text-muted-foreground">Fetching live metrics and charts...</p>
+        </Card>
+      </DashboardLayout>
+    );
+  }
+
+  if (error || !data) {
+    return (
+      <DashboardLayout>
+        <PageHeader title="Dashboard" description="Error loading dashboard" />
+        <Card className="flex flex-col items-center justify-center min-h-[500px]">
+          <AlertTriangle className="w-8 h-8 text-destructive mb-3" />
+          <p className="text-sm font-medium">Failed to load dashboard data.</p>
+          <p className="text-xs text-muted-foreground mt-1">Please try refreshing the page.</p>
+          <Button onClick={() => window.location.reload()} variant="outline" className="mt-4">Retry</Button>
         </Card>
       </DashboardLayout>
     );

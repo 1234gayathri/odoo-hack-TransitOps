@@ -17,7 +17,7 @@ export async function GET() {
       // audit_logs might not exist, ignore
     }
 
-    const notifRes = await query('SELECT * FROM notifications ORDER BY timestamp DESC LIMIT 6');
+    const notifRes = await query('SELECT * FROM notifications ORDER BY created_at DESC LIMIT 6');
     const expensesRes = await query("SELECT category, amount FROM expenses WHERE status = 'approved'");
 
     // Aggregate Data for KPIs
@@ -133,7 +133,7 @@ export async function GET() {
           title: r.title,
           message: r.message,
           type: r.type,
-          timestamp: r.timestamp
+          timestamp: r.created_at
         }))
       }
     });
