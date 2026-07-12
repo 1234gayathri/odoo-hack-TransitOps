@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { exec } from 'child_process';
 import type { Role, Permission, ModuleKey } from './types';
 
 export interface User {
@@ -13,8 +14,6 @@ export interface User {
 
 export type PermissionMatrix = Record<Role, Partial<Record<ModuleKey, Permission>>>;
 
-// Initialize PostgreSQL Pool connection
-// Connect to port 5435 (the workspace-level passwordless PostgreSQL instance we started)
 const pool = new Pool({
   host: '127.0.0.1',
   port: 5435,
@@ -67,8 +66,39 @@ const INITIAL_PERMISSIONS: PermissionMatrix = {
   }
 };
 
+// Ensure server is running or start it automatically
+async function ensurePostgresRunning() {
+  try {
+    const client = await pool.connect();
+    client.release();
+  } catch (err: any) {
+    if (err.code === 'ECONNREFUSED' || err.message.includes('ECONNREFUSED')) {
+      console.log('PostgreSQL on port 5435 is offline. Attempting auto-start...');
+      
+      const startCmd = `powershell -Command "Start-Process -FilePath 'C:\\Program Files\\PostgreSQL\\16\\bin\\postgres.exe' -ArgumentList '-D d:\\Transistops\\db_data -p 5435' -WindowStyle Hidden"`;
+      
+      await new Promise<void>((resolve) => {
+        exec(startCmd, () => {
+          // Wait 3.5 seconds for the database engine to finish starting and listen on the port
+          setTimeout(resolve, 3500);
+        });
+      });
+      
+      // Verify connection after auto-start
+      const client = await pool.connect();
+      client.release();
+      console.log('PostgreSQL auto-started successfully on port 5435.');
+    } else {
+      throw err;
+    }
+  }
+}
+
 export async function initializeDatabase() {
   if (isInitialized) return;
+
+  // Make sure postgres server is listening
+  await ensurePostgresRunning();
 
   const client = await pool.connect();
   try {
