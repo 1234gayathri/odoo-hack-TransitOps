@@ -181,6 +181,13 @@ export async function initializeDatabase() {
       );
     `);
 
+    // Force alter for existing Vercel deployments that might have the old schema
+    try {
+      await client.query('ALTER TABLE maintenance_records ALTER COLUMN invoice_url TYPE TEXT;');
+    } catch (e) {
+      // Ignore if column doesn't exist or other error
+    }
+
     // 2. permissions
     await client.query(`
       CREATE TABLE IF NOT EXISTS permissions (

@@ -1,14 +1,13 @@
 import { query } from '../lib/db';
 
-async function checkSchema() {
+async function check() {
   try {
-    const res = await query("SELECT column_name, data_type, character_maximum_length FROM information_schema.columns WHERE table_name = 'maintenance_records';");
-    console.table(res.rows);
+    const res = await query("SELECT table_name, column_name FROM information_schema.columns WHERE character_maximum_length = 250");
+    console.log(res.rows);
   } catch (err) {
-    console.error('Error:', err);
+    console.error(err);
   } finally {
     process.exit(0);
   }
 }
-
-checkSchema();
+check();
