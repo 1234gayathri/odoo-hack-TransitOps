@@ -12,6 +12,25 @@ TransitOps is a modern, enterprise-grade, and role-based fleet management platfo
 
 ---
 
+## 🔐 Login Credentials (All Roles)
+
+Use the following credentials to log in and explore each role's dashboard. All accounts share the same password.
+
+**Password for all roles:** `transitops2026`
+
+| Role | Name | Email |
+|------|------|-------|
+| 🔴 Super Admin | Alexander Chen | `alex.chen@transitops.io` |
+| 🟠 Fleet Manager | Sarah Williams | `sarah.w@transitops.io` |
+| 🟡 Dispatcher | Marcus Johnson | `marcus.j@transitops.io` |
+| 🔵 Safety Officer | Emily Rodriguez | `emily.r@transitops.io` |
+| 🟢 Maintenance Manager | David Park | `david.p@transitops.io` |
+| 🟣 Finance Analyst | Lisa Anderson | `lisa.a@transitops.io` |
+
+> All credentials are pre-seeded into the database automatically on the first visit.
+
+---
+
 ## Technical Stack & Architecture
 
 - **Frontend**: Next.js 14 (App Router), TailwindCSS, Framer Motion (micro-animations), Recharts (data visualizations), Lucide Icons.
