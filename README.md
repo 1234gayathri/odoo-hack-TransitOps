@@ -4,6 +4,14 @@ TransitOps is a modern, enterprise-grade, and role-based fleet management platfo
 
 ---
 
+## 🚀 Live Demo
+
+**Deployed on Vercel:** [https://odoo-hack-transit-ops-khaki.vercel.app](https://odoo-hack-transit-ops-khaki.vercel.app)
+
+> Click the link above to access the fully deployed, production version of TransitOps. All 6 role-based logins are functional with real-time data from the cloud PostgreSQL database.
+
+---
+
 ## Technical Stack & Architecture
 
 - **Frontend**: Next.js 14 (App Router), TailwindCSS, Framer Motion (micro-animations), Recharts (data visualizations), Lucide Icons.
