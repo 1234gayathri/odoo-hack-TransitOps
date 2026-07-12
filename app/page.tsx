@@ -253,18 +253,8 @@ export default function LoginPage() {
                     )}
                   </Button>
                 </form>
-
-                <div className="relative my-6">
-                  <Separator />
-                  <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-background px-3 text-xs text-muted-foreground">
-                    OR
-                  </span>
-                </div>
-
-                <Button variant="outline" className="w-full h-11" onClick={() => toast.info('SSO integration available in Enterprise plan')}>
-                  <ShieldCheck className="w-4 h-4 mr-2" /> Continue with SSO
-                </Button>
               </motion.div>
+
             )}
           </AnimatePresence>
         </div>
