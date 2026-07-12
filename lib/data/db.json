@@ -1,0 +1,89 @@
+{
+  "users": [
+    { "id": "u1", "name": "Alexander Chen", "email": "alex.chen@transitops.io", "role": "super_admin", "avatar": "AC", "status": "active", "lastActive": "2026-07-12T08:30:00Z" },
+    { "id": "u2", "name": "Sarah Williams", "email": "sarah.w@transitops.io", "role": "fleet_manager", "avatar": "SW", "status": "active", "lastActive": "2026-07-12T07:45:00Z" },
+    { "id": "u3", "name": "Marcus Johnson", "email": "marcus.j@transitops.io", "role": "dispatcher", "avatar": "MJ", "status": "active", "lastActive": "2026-07-12T09:15:00Z" },
+    { "id": "u4", "name": "Emily Rodriguez", "email": "emily.r@transitops.io", "role": "safety_officer", "avatar": "ER", "status": "active", "lastActive": "2026-07-11T16:20:00Z" },
+    { "id": "u5", "name": "David Park", "email": "david.p@transitops.io", "role": "maintenance_manager", "avatar": "DP", "status": "active", "lastActive": "2026-07-12T06:30:00Z" },
+    { "id": "u6", "name": "Lisa Anderson", "email": "lisa.a@transitops.io", "role": "finance_analyst", "avatar": "LA", "status": "active", "lastActive": "2026-07-11T18:00:00Z" },
+    { "id": "u7", "name": "James Miller", "email": "james.m@transitops.io", "role": "dispatcher", "avatar": "JM", "status": "inactive", "lastActive": "2026-07-08T14:00:00Z" },
+    { "id": "u8", "name": "Rachel Green", "email": "rachel.g@transitops.io", "role": "fleet_manager", "avatar": "RG", "status": "active", "lastActive": "2026-07-12T05:45:00Z" }
+  ],
+  "permissions": {
+    "super_admin": {
+      "dashboard": "full",
+      "users": "full",
+      "roles": "full",
+      "vehicles": "full",
+      "drivers": "full",
+      "trips": "full",
+      "dispatch": "full",
+      "maintenance": "full",
+      "fuel": "full",
+      "expenses": "full",
+      "reports": "full",
+      "analytics": "full",
+      "notifications": "full",
+      "audit": "full",
+      "settings": "full",
+      "profile": "full"
+    },
+    "fleet_manager": {
+      "dashboard": "read",
+      "vehicles": "full",
+      "drivers": "read",
+      "trips": "read",
+      "dispatch": "read",
+      "maintenance": "read",
+      "fuel": "read",
+      "expenses": "read",
+      "reports": "export",
+      "analytics": "read",
+      "notifications": "read",
+      "settings": "read",
+      "profile": "full"
+    },
+    "dispatcher": {
+      "dashboard": "read",
+      "vehicles": "read",
+      "drivers": "read",
+      "trips": "full",
+      "dispatch": "full",
+      "maintenance": "read",
+      "notifications": "read",
+      "settings": "read",
+      "profile": "full"
+    },
+    "safety_officer": {
+      "dashboard": "read",
+      "drivers": "full",
+      "vehicles": "read",
+      "trips": "read",
+      "reports": "export",
+      "notifications": "read",
+      "settings": "read",
+      "profile": "full"
+    },
+    "maintenance_manager": {
+      "dashboard": "read",
+      "vehicles": "read",
+      "maintenance": "full",
+      "trips": "read",
+      "reports": "export",
+      "notifications": "read",
+      "settings": "read",
+      "profile": "full"
+    },
+    "finance_analyst": {
+      "dashboard": "read",
+      "fuel": "full",
+      "expenses": "full",
+      "maintenance": "read",
+      "reports": "full",
+      "analytics": "full",
+      "notifications": "read",
+      "settings": "read",
+      "profile": "full"
+    }
+  }
+}

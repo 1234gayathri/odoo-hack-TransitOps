@@ -29,6 +29,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         localStorage.removeItem(STORAGE_KEY);
       }
     }
+
+    // Fetch latest permissions matrix from backend and cache it locally
+    fetch('/api/roles/permissions')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.permissions) {
+          localStorage.setItem('transitops-permissions', JSON.stringify(data.permissions));
+        }
+      })
+      .catch(() => {});
   }, []);
 
   const login = (authUser: AuthUser) => {

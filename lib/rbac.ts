@@ -151,7 +151,18 @@ export const PERMISSION_MATRIX: Record<Role, Partial<Record<ModuleKey, Permissio
 };
 
 export function hasPermission(role: Role, module: ModuleKey, required: Permission): boolean {
-  const perm = PERMISSION_MATRIX[role]?.[module];
+  let matrix = PERMISSION_MATRIX;
+  if (typeof window !== 'undefined') {
+    const stored = localStorage.getItem('transitops-permissions');
+    if (stored) {
+      try {
+        matrix = JSON.parse(stored);
+      } catch {
+        // ignore
+      }
+    }
+  }
+  const perm = matrix[role]?.[module];
   if (!perm || perm === 'none') return false;
   if (perm === 'full') return true;
   if (required === 'full') return false;
@@ -160,7 +171,18 @@ export function hasPermission(role: Role, module: ModuleKey, required: Permissio
 }
 
 export function canAccessModule(role: Role, module: ModuleKey): boolean {
-  const perm = PERMISSION_MATRIX[role]?.[module];
+  let matrix = PERMISSION_MATRIX;
+  if (typeof window !== 'undefined') {
+    const stored = localStorage.getItem('transitops-permissions');
+    if (stored) {
+      try {
+        matrix = JSON.parse(stored);
+      } catch {
+        // ignore
+      }
+    }
+  }
+  const perm = matrix[role]?.[module];
   return !!perm && perm !== 'none';
 }
 

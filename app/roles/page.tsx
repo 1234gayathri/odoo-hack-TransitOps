@@ -1,5 +1,6 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   ShieldCheck,
@@ -19,6 +20,7 @@ import {
   Trash2,
   Download,
   FileText,
+  Loader2,
 } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/dashboard-layout';
 import { PageHeader } from '@/components/shared/page-components';
@@ -29,6 +31,8 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { ROLES, PERMISSION_MATRIX, MODULES, MODULE_LABELS, PERMISSION_LABELS, PERMISSION_COLORS, ROLE_HIERARCHY } from '@/lib/rbac';
 import type { Role, Permission, ModuleKey } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/lib/auth-context';
+import { toast } from 'sonner';
 
 const ROLE_ICONS: Record<Role, any> = {
   super_admin: ShieldCheck,
@@ -51,10 +55,83 @@ const PERMISSION_ICON: Record<Permission, any> = {
 };
 
 export default function RolesPage() {
+  const { user } = useAuth();
+  const isSuperAdmin = user?.role === 'super_admin';
+
+  const [matrix, setMatrix] = useState<Record<Role, Partial<Record<ModuleKey, Permission>>>>(PERMISSION_MATRIX);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch permission matrix from backend
+  const fetchPermissions = async () => {
+    try {
+      setLoading(true);
+      const res = await fetch('/api/roles/permissions');
+      const data = await res.json();
+      if (res.ok && data.permissions) {
+        setMatrix(data.permissions);
+        localStorage.setItem('transitops-permissions', JSON.stringify(data.permissions));
+      }
+    } catch (err: any) {
+      toast.error('Failed to load permissions', { description: err.message });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchPermissions();
+  }, []);
+
+  // Update permission on backend and locally
+  const handlePermissionChange = async (roleKey: Role, moduleKey: ModuleKey, newPerm: Permission) => {
+    if (roleKey === 'super_admin') {
+      toast.warning('Super Admin is unrestricted', {
+        description: 'Super Admin permissions must remain set to full to protect command center access.',
+      });
+      return;
+    }
+
+    try {
+      // Optimistic update
+      const updatedMatrix = {
+        ...matrix,
+        [roleKey]: {
+          ...matrix[roleKey],
+          [moduleKey]: newPerm,
+        },
+      };
+      setMatrix(updatedMatrix);
+      localStorage.setItem('transitops-permissions', JSON.stringify(updatedMatrix));
+
+      const res = await fetch('/api/roles/permissions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          role: roleKey,
+          module: moduleKey,
+          permission: newPerm,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to save changes');
+      }
+
+      toast.success('Permission Updated', {
+        description: `Set ${ROLES[roleKey].label}'s ${MODULE_LABELS[moduleKey]} access to ${PERMISSION_LABELS[newPerm]}.`,
+      });
+    } catch (err: any) {
+      toast.error('Failed to update permission', { description: err.message });
+      fetchPermissions(); // Revert
+    }
+  };
+
   return (
     <DashboardLayout>
       <PageHeader title="Role Management" description="Enterprise RBAC system with role hierarchy, permission matrix, and detailed access control.">
-        <Button variant="outline" size="sm">
+        <Button variant="outline" size="sm" onClick={() => toast.success('Matrix exported')}>
           <FileText className="w-4 h-4 mr-2" /> Export Matrix
         </Button>
       </PageHeader>
@@ -86,16 +163,16 @@ export default function RolesPage() {
                   <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[80%] h-px bg-border" />
 
                   <div className="grid grid-cols-1 md:grid-cols-5 gap-6 pt-8">
-                    {ROLE_HIERARCHY.slice(1).map((role, i) => (
+                    {ROLE_HIERARCHY.slice(1).map((roleKey, i) => (
                       <motion.div
-                        key={role}
+                        key={roleKey}
                         initial={{ opacity: 0, y: 12 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: i * 0.1 }}
                       >
                         <div className="relative">
                           <div className="absolute -top-8 left-1/2 -translate-x-1/2 w-px h-8 bg-border" />
-                          <RoleNode role={role} />
+                          <RoleNode role={roleKey} />
                         </div>
                       </motion.div>
                     ))}
@@ -110,8 +187,17 @@ export default function RolesPage() {
         <TabsContent value="matrix">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Module Access Matrix</CardTitle>
-              <CardDescription className="text-xs">Permission levels for each role across all modules</CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-base">Module Access Matrix</CardTitle>
+                  <CardDescription className="text-xs">
+                    {isSuperAdmin
+                      ? 'Select permission levels in cell dropdowns to modify module access.'
+                      : 'Permission levels for each role across all modules.'}
+                  </CardDescription>
+                </div>
+                {loading && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
+              </div>
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto scrollbar-thin">
@@ -120,29 +206,53 @@ export default function RolesPage() {
                     <tr className="border-b border-border">
                       <th className="text-left p-3 font-semibold text-xs text-muted-foreground sticky left-0 bg-card z-10">Role</th>
                       {MODULES.filter((m) => m !== 'profile').map((mod) => (
-                        <th key={mod} className="p-3 font-semibold text-xs text-muted-foreground text-center min-w-[100px]">
-                          <div className="flex flex-col items-center gap-1">
-                            <span>{MODULE_LABELS[mod]}</span>
-                          </div>
+                        <th key={mod} className="p-3 font-semibold text-xs text-muted-foreground text-center min-w-[120px]">
+                          <span>{MODULE_LABELS[mod]}</span>
                         </th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {ROLE_HIERARCHY.map((role) => {
-                      const Icon = ROLE_ICONS[role];
+                    {ROLE_HIERARCHY.map((roleKey) => {
+                      const Icon = ROLE_ICONS[roleKey];
                       return (
-                        <tr key={role} className="border-b border-border last:border-0 hover:bg-accent/30">
+                        <tr key={roleKey} className="border-b border-border last:border-0 hover:bg-accent/30">
                           <td className="p-3 sticky left-0 bg-card z-10">
                             <div className="flex items-center gap-2">
                               <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
                                 <Icon className="w-4 h-4 text-primary" />
                               </div>
-                              <span className="font-medium text-sm">{ROLES[role].label}</span>
+                              <span className="font-medium text-sm">{ROLES[roleKey].label}</span>
                             </div>
                           </td>
                           {MODULES.filter((m) => m !== 'profile').map((mod) => {
-                            const perm = PERMISSION_MATRIX[role][mod] || 'none';
+                            const perm = matrix[roleKey]?.[mod] || 'none';
+                            
+                            // If user is super admin and the row is NOT super admin, allow editing
+                            if (isSuperAdmin && roleKey !== 'super_admin') {
+                              return (
+                                <td key={mod} className="p-2 text-center">
+                                  <select
+                                    value={perm}
+                                    onChange={(e) => handlePermissionChange(roleKey, mod, e.target.value as Permission)}
+                                    className={cn(
+                                      "text-xs bg-transparent border rounded px-2 py-1 outline-none font-medium cursor-pointer transition-all",
+                                      perm === 'full' ? 'border-primary/40 text-primary bg-primary/5' :
+                                      perm === 'none' ? 'border-border text-muted-foreground bg-muted/10' :
+                                      'border-success/40 text-success bg-success/5'
+                                    )}
+                                  >
+                                    {(Object.keys(PERMISSION_LABELS) as Permission[]).map((p) => (
+                                      <option key={p} value={p} className="bg-background text-foreground">
+                                        {PERMISSION_LABELS[p]}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </td>
+                              );
+                            }
+
+                            // Read-only chip
                             return (
                               <td key={mod} className="p-3 text-center">
                                 <PermissionChip permission={perm} />
@@ -174,16 +284,16 @@ export default function RolesPage() {
         {/* Role Details */}
         <TabsContent value="details">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {ROLE_HIERARCHY.map((role, idx) => {
-              const Icon = ROLE_ICONS[role];
-              const roleData = ROLES[role];
-              const perms = PERMISSION_MATRIX[role];
+            {ROLE_HIERARCHY.map((roleKey, idx) => {
+              const Icon = ROLE_ICONS[roleKey];
+              const roleData = ROLES[roleKey];
+              const perms = matrix[roleKey] || {};
               const accessibleModules = Object.entries(perms).filter(([, p]) => p && p !== 'none');
               const hiddenModules = MODULES.filter((m) => m !== 'profile' && (!perms[m] || perms[m] === 'none'));
 
               return (
                 <motion.div
-                  key={role}
+                  key={roleKey}
                   initial={{ opacity: 0, y: 12 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: idx * 0.05 }}
@@ -201,51 +311,54 @@ export default function RolesPage() {
                       </div>
                     </CardHeader>
                     <CardContent className="space-y-4">
-                        {/* Accessible Modules */}
+                      {/* Accessible Modules */}
+                      <div>
+                        <p className="text-xs font-semibold text-muted-foreground mb-2">Accessible Modules</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {accessibleModules.map(([mod, perm]) => (
+                            <div key={mod} className="flex items-center gap-1 px-2 py-1 rounded-md border border-border text-xs">
+                              <span className="font-medium">{MODULE_LABELS[mod as ModuleKey]}</span>
+                              <span className={cn('inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium border', PERMISSION_COLORS[perm as Permission])}>
+                                {PERMISSION_LABELS[perm as Permission]}
+                              </span>
+                            </div>
+                          ))}
+                          {accessibleModules.length === 0 && (
+                            <span className="text-xs text-muted-foreground italic">No modules accessible.</span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Hidden Modules */}
+                      {hiddenModules.length > 0 && (
                         <div>
-                          <p className="text-xs font-semibold text-muted-foreground mb-2">Accessible Modules</p>
+                          <p className="text-xs font-semibold text-muted-foreground mb-2">Hidden Modules</p>
                           <div className="flex flex-wrap gap-1.5">
-                            {accessibleModules.map(([mod, perm]) => (
-                              <div key={mod} className="flex items-center gap-1 px-2 py-1 rounded-md border border-border text-xs">
-                                <span className="font-medium">{MODULE_LABELS[mod as ModuleKey]}</span>
-                                <span className={cn('inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium border', PERMISSION_COLORS[perm as Permission])}>
-                                  {PERMISSION_LABELS[perm as Permission]}
-                                </span>
+                            {hiddenModules.map((mod) => (
+                              <div key={mod} className="flex items-center gap-1 px-2 py-1 rounded-md bg-muted text-muted-foreground text-xs">
+                                <Lock className="w-3 h-3" />
+                                {MODULE_LABELS[mod]}
                               </div>
                             ))}
                           </div>
                         </div>
+                      )}
 
-                        {/* Hidden Modules */}
-                        {hiddenModules.length > 0 && (
-                          <div>
-                            <p className="text-xs font-semibold text-muted-foreground mb-2">Hidden Modules</p>
-                            <div className="flex flex-wrap gap-1.5">
-                              {hiddenModules.map((mod) => (
-                                <div key={mod} className="flex items-center gap-1 px-2 py-1 rounded-md bg-muted text-muted-foreground text-xs">
-                                  <Lock className="w-3 h-3" />
-                                  {MODULE_LABELS[mod]}
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Quick Stats */}
-                        <div className="grid grid-cols-3 gap-2 pt-2 border-t border-border">
-                          <div className="text-center">
-                            <p className="text-lg font-bold text-success">{accessibleModules.length}</p>
-                            <p className="text-[10px] text-muted-foreground">Accessible</p>
-                          </div>
-                          <div className="text-center">
-                            <p className="text-lg font-bold text-primary">{accessibleModules.filter(([, p]) => p === 'full').length}</p>
-                            <p className="text-[10px] text-muted-foreground">Full Access</p>
-                          </div>
-                          <div className="text-center">
-                            <p className="text-lg font-bold text-destructive">{hiddenModules.length}</p>
-                            <p className="text-[10px] text-muted-foreground">No Access</p>
-                          </div>
+                      {/* Quick Stats */}
+                      <div className="grid grid-cols-3 gap-2 pt-2 border-t border-border">
+                        <div className="text-center">
+                          <p className="text-lg font-bold text-success">{accessibleModules.length}</p>
+                          <p className="text-[10px] text-muted-foreground">Accessible</p>
                         </div>
+                        <div className="text-center">
+                          <p className="text-lg font-bold text-primary">{accessibleModules.filter(([, p]) => p === 'full').length}</p>
+                          <p className="text-[10px] text-muted-foreground">Full Access</p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-lg font-bold text-destructive">{hiddenModules.length}</p>
+                          <p className="text-[10px] text-muted-foreground">No Access</p>
+                        </div>
+                      </div>
                     </CardContent>
                   </Card>
                 </motion.div>
