@@ -1,0 +1,10 @@
+2026-07-12 14:25:25.292 IST [21356] LOG:  starting PostgreSQL 16.13, compiled by Visual C++ build 1944, 64-bit
+2026-07-12 14:25:25.301 IST [21356] LOG:  listening on IPv6 address "::1", port 5435
+2026-07-12 14:25:25.301 IST [21356] LOG:  listening on IPv4 address "127.0.0.1", port 5435
+2026-07-12 14:25:25.411 IST [1600] LOG:  database system was interrupted; last known up at 2026-07-12 14:24:33 IST
+2026-07-12 14:25:26.067 IST [1600] LOG:  database system was not properly shut down; automatic recovery in progress
+2026-07-12 14:25:26.071 IST [1600] LOG:  invalid record length at 0/1577738: expected at least 24, got 0
+2026-07-12 14:25:26.071 IST [1600] LOG:  redo is not required
+2026-07-12 14:25:26.094 IST [30732] LOG:  checkpoint starting: end-of-recovery immediate wait
+2026-07-12 14:25:26.138 IST [30732] LOG:  checkpoint complete: wrote 3 buffers (0.0%); 0 WAL file(s) added, 0 removed, 0 recycled; write=0.005 s, sync=0.011 s, total=0.064 s; sync files=2, longest=0.006 s, average=0.006 s; distance=0 kB, estimate=0 kB; lsn=0/1577738, redo lsn=0/1577738
+2026-07-12 14:25:26.474 IST [21356] LOG:  database system is ready to accept connections

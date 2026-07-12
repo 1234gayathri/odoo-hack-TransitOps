@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { readDb } from '@/lib/db';
+import { query } from '@/lib/db';
 
 export async function POST(request: Request) {
   try {
@@ -12,11 +12,9 @@ export async function POST(request: Request) {
       );
     }
 
-    // Read users dynamically from JSON database
-    const db = readDb();
-    const userEntry = db.users.find(
-      (u) => u.email.toLowerCase() === email.trim().toLowerCase()
-    );
+    // Read user dynamically from PostgreSQL database
+    const res = await query('SELECT id, name, email, role, avatar, status FROM users WHERE LOWER(email) = LOWER($1)', [email.trim()]);
+    const userEntry = res.rows[0];
 
     if (!userEntry) {
       return NextResponse.json(
