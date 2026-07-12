@@ -263,7 +263,7 @@ export async function initializeDatabase() {
         completed_date VARCHAR(50),
         cost INTEGER NOT NULL DEFAULT 0,
         technician VARCHAR(100) NOT NULL,
-        invoice_url VARCHAR(250),
+        invoice_url TEXT,
         actual_cost INTEGER,
         vendor VARCHAR(100),
         approval_status VARCHAR(50) DEFAULT 'none',
