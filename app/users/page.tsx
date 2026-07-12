@@ -47,10 +47,10 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useAuth } from '@/lib/auth-context';
-import { ROLES, hasPermission } from '@/lib/rbac';
+import { ROLES, hasPermission, PERMISSION_MATRIX, MODULE_LABELS, PERMISSION_LABELS, PERMISSION_COLORS } from '@/lib/rbac';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
-import type { Role, User } from '@/lib/types';
+import type { Role, User, ModuleKey, Permission } from '@/lib/types';
 
 export default function UsersPage() {
   const { user } = useAuth();
@@ -66,6 +66,10 @@ export default function UsersPage() {
   // Dialog State
   const [isOpen, setIsOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
+
+  // Profile View State
+  const [profileUser, setProfileUser] = useState<User | null>(null);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
 
   // Form Fields State
   const [name, setName] = useState('');
@@ -151,6 +155,52 @@ export default function UsersPage() {
       setStatus('active');
     }
     setIsOpen(true);
+  };
+
+  const handleOpenProfile = (u: User) => {
+    setProfileUser(u);
+    setIsProfileOpen(true);
+  };
+
+  // Export users to CSV
+  const handleExportCSV = () => {
+    if (usersList.length === 0) {
+      toast.warning('No users to export');
+      return;
+    }
+
+    try {
+      const headers = ['ID', 'Name', 'Email', 'Role', 'Status', 'Last Active'];
+      const rows = usersList.map((u) => [
+        u.id,
+        u.name,
+        u.email,
+        ROLES[u.role]?.label || u.role,
+        u.status,
+        formatDate(u.lastActive),
+      ]);
+
+      const csvContent = [
+        headers.join(','),
+        ...rows.map((row) => row.map((val) => `"${String(val).replace(/"/g, '""')}"`).join(',')),
+      ].join('\n');
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', `TransitOps_Users_${new Date().toISOString().split('T')[0]}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      toast.success('Export Successful', {
+        description: 'The user registry has been exported to CSV.',
+      });
+    } catch (err: any) {
+      toast.error('Export Failed', { description: err.message });
+    }
   };
 
   // Create or Update user
@@ -258,7 +308,7 @@ export default function UsersPage() {
         title="User Management"
         description="Manage user accounts, roles, and access permissions."
       >
-        <Button variant="outline" size="sm" onClick={() => toast.success('User list exported')}>
+        <Button variant="outline" size="sm" onClick={handleExportCSV}>
           <Download className="w-4 h-4 mr-2" /> Export
         </Button>
         {canCreate && (
@@ -379,7 +429,7 @@ export default function UsersPage() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => toast.info(`Viewing ${u.name}'s profile`)}>
+                          <DropdownMenuItem onClick={() => handleOpenProfile(u)}>
                             View Profile
                           </DropdownMenuItem>
                           {canEdit && (
@@ -509,6 +559,118 @@ export default function UsersPage() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* View Profile Dialog */}
+      <Dialog open={isProfileOpen} onOpenChange={setIsProfileOpen}>
+        <DialogContent className="sm:max-w-[450px]">
+          <DialogHeader>
+            <DialogTitle>User Profile Details</DialogTitle>
+            <DialogDescription>
+              Detailed account overview and access authorization levels.
+            </DialogDescription>
+          </DialogHeader>
+
+          {profileUser && (
+            <div className="space-y-6 py-4">
+              {/* Header profile info */}
+              <div className="flex items-center gap-4">
+                <Avatar className="w-16 h-16 border-2 border-border shrink-0">
+                  <AvatarFallback className="bg-primary/10 text-primary text-xl font-bold">
+                    {profileUser.avatar}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="min-w-0">
+                  <h3 className="text-lg font-bold truncate">{profileUser.name}</h3>
+                  <p className="text-sm text-muted-foreground flex items-center gap-1.5 truncate">
+                    <Mail className="w-3.5 h-3.5" /> {profileUser.email}
+                  </p>
+                </div>
+              </div>
+
+              {/* Grid info */}
+              <div className="grid grid-cols-2 gap-4 border-y py-4 border-border text-sm">
+                <div>
+                  <p className="text-xs text-muted-foreground font-semibold">Security Role</p>
+                  <div className="mt-1">
+                    {ROLES[profileUser.role] ? (
+                      <Badge
+                        variant="outline"
+                        style={{
+                          borderColor: `${ROLES[profileUser.role].color}30`,
+                          color: ROLES[profileUser.role].color,
+                          backgroundColor: `${ROLES[profileUser.role].color}10`,
+                        }}
+                      >
+                        <Shield className="w-3 h-3 mr-1" />
+                        {ROLES[profileUser.role].label}
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline">{profileUser.role}</Badge>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <p className="text-xs text-muted-foreground font-semibold">Account Status</p>
+                  <div className="mt-1">
+                    <StatusBadge status={profileUser.status} />
+                  </div>
+                </div>
+
+                <div>
+                  <p className="text-xs text-muted-foreground font-semibold">Account ID</p>
+                  <p className="mt-1 font-mono font-medium text-foreground">{profileUser.id}</p>
+                </div>
+
+                <div>
+                  <p className="text-xs text-muted-foreground font-semibold">Last Active Connection</p>
+                  <p className="mt-1 text-xs text-foreground font-medium">{formatDate(profileUser.lastActive)}</p>
+                </div>
+              </div>
+
+              {/* Permissions overview based on role */}
+              <div>
+                <p className="text-xs text-muted-foreground font-semibold mb-2">Module Access Privileges</p>
+                <div className="flex flex-wrap gap-1.5 max-h-[140px] overflow-y-auto pr-1 scrollbar-thin">
+                  {(() => {
+                    const stored = typeof window !== 'undefined' ? localStorage.getItem('transitops-permissions') : null;
+                    let matrix = PERMISSION_MATRIX;
+                    if (stored) {
+                      try {
+                        matrix = JSON.parse(stored);
+                      } catch {}
+                    }
+                    const perms = matrix[profileUser.role] || {};
+                    const accessible = Object.entries(perms).filter(([, p]) => p && p !== 'none');
+
+                    if (accessible.length === 0) {
+                      return <span className="text-xs text-muted-foreground italic">No modules accessible.</span>;
+                    }
+
+                    return accessible.map(([mod, perm]) => (
+                      <div key={mod} className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-border text-xs bg-accent/10">
+                        <span className="font-medium text-xs">{MODULE_LABELS[mod as ModuleKey]}</span>
+                        <span className={cn(
+                          'inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-semibold border',
+                          PERMISSION_COLORS[perm as Permission]
+                        )}>
+                          {PERMISSION_LABELS[perm as Permission]}
+                        </span>
+                      </div>
+                    ));
+                  })()}
+                </div>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsProfileOpen(false)}>
+              Close Card
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </DashboardLayout>
