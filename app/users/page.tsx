@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   Users,
   UserPlus,
@@ -14,6 +14,14 @@ import {
   Crown,
   Mail,
   Loader2,
+  X,
+  Eye,
+  AlertCircle,
+  CheckCircle2,
+  XCircle,
+  Lock,
+  KeyRound,
+  FileSpreadsheet,
 } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/dashboard-layout';
 import { PageHeader, StatusBadge, EmptyState } from '@/components/shared/page-components';
@@ -47,48 +55,74 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useAuth } from '@/lib/auth-context';
-import { ROLES, hasPermission, PERMISSION_MATRIX, MODULE_LABELS, PERMISSION_LABELS, PERMISSION_COLORS } from '@/lib/rbac';
+import {
+  ROLES,
+  hasPermission,
+  PERMISSION_MATRIX,
+  MODULE_LABELS,
+  PERMISSION_LABELS,
+  PERMISSION_COLORS,
+} from '@/lib/rbac';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import type { Role, User, ModuleKey, Permission } from '@/lib/types';
 
+const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function formatDate(iso: string) {
+  try {
+    return new Date(iso).toLocaleString('en-US', {
+      month: 'short', day: 'numeric', year: 'numeric',
+      hour: 'numeric', minute: '2-digit',
+    });
+  } catch {
+    return iso;
+  }
+}
+
+function getRolePermissions(userRole: Role) {
+  let matrix: any = PERMISSION_MATRIX;
+  if (typeof window !== 'undefined') {
+    const stored = localStorage.getItem('transitops-permissions');
+    if (stored) {
+      try { matrix = JSON.parse(stored); } catch {}
+    }
+  }
+  return matrix[userRole] || {};
+}
+
 export default function UsersPage() {
   const { user } = useAuth();
-  const role = user?.role || 'super_admin';
-  const canCreate = hasPermission(role, 'users', 'create');
-  const canEdit = hasPermission(role, 'users', 'update');
-  const canDelete = hasPermission(role, 'users', 'delete');
+  const currentRole = user?.role || 'super_admin';
+  const canCreate = hasPermission(currentRole, 'users', 'create');
+  const canEdit   = hasPermission(currentRole, 'users', 'update');
+  const canDelete = hasPermission(currentRole, 'users', 'delete');
 
-  const [usersList, setUsersList] = useState<User[]>([]);
-  const [loadingUsers, setLoadingUsers] = useState(true);
-  const [search, setSearch] = useState('');
+  const [usersList, setUsersList]         = useState<User[]>([]);
+  const [loadingUsers, setLoadingUsers]   = useState(true);
+  const [search, setSearch]               = useState('');
 
-  // Dialog State
-  const [isOpen, setIsOpen] = useState(false);
-  const [editingUser, setEditingUser] = useState<User | null>(null);
+  // Add / Edit dialog
+  const [isOpen, setIsOpen]               = useState(false);
+  const [editingUser, setEditingUser]     = useState<User | null>(null);
+  const [formName, setFormName]           = useState('');
+  const [formEmail, setFormEmail]         = useState('');
+  const [formRole, setFormRole]           = useState<Role>('dispatcher');
+  const [formStatus, setFormStatus]       = useState<'active' | 'inactive'>('active');
+  const [formLoading, setFormLoading]     = useState(false);
+  const [formErrors, setFormErrors]       = useState<Record<string, string>>({});
 
-  // Profile View State
-  const [profileUser, setProfileUser] = useState<User | null>(null);
+  // Profile dialog
+  const [profileUser, setProfileUser]     = useState<User | null>(null);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
 
-  // Form Fields State
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [userRole, setUserRole] = useState<Role>('dispatcher');
-  const [status, setStatus] = useState<'active' | 'inactive'>('active');
-  const [formLoading, setFormLoading] = useState(false);
-
-  // Fetch users from backend
   const fetchUsers = async () => {
     try {
       setLoadingUsers(true);
-      const res = await fetch('/api/users');
+      const res  = await fetch('/api/users');
       const data = await res.json();
-      if (res.ok) {
-        setUsersList(data.users || []);
-      } else {
-        toast.error('Failed to load users', { description: data.error });
-      }
+      if (res.ok) setUsersList(data.users || []);
+      else toast.error('Failed to load users', { description: data.error });
     } catch (err: any) {
       toast.error('Network Error', { description: err.message });
     } finally {
@@ -96,243 +130,178 @@ export default function UsersPage() {
     }
   };
 
-  useEffect(() => {
-    fetchUsers();
-  }, []);
+  useEffect(() => { fetchUsers(); }, []);
 
-  const stats = useMemo(() => {
-    return [
-      {
-        label: 'Total Users',
-        value: usersList.length,
-        icon: <Users className="w-5 h-5" />,
-        color: 'hsl(var(--primary))',
-      },
-      {
-        label: 'Active',
-        value: usersList.filter((u) => u.status === 'active').length,
-        icon: <UserCheck className="w-5 h-5" />,
-        color: 'hsl(var(--success))',
-      },
-      {
-        label: 'Inactive',
-        value: usersList.filter((u) => u.status === 'inactive').length,
-        icon: <UserX className="w-5 h-5" />,
-        color: 'hsl(var(--muted-foreground))',
-      },
-      {
-        label: 'Admins',
-        value: usersList.filter((u) => u.role === 'super_admin').length,
-        icon: <Crown className="w-5 h-5" />,
-        color: 'hsl(var(--warning))',
-      },
-    ];
-  }, [usersList]);
+  const stats = useMemo(() => [
+    { label: 'Total Users',  value: usersList.length,                                       icon: <Users className="w-5 h-5" />,     color: '#6366f1' },
+    { label: 'Active',       value: usersList.filter(u => u.status === 'active').length,     icon: <UserCheck className="w-5 h-5" />, color: '#22c55e' },
+    { label: 'Inactive',     value: usersList.filter(u => u.status === 'inactive').length,   icon: <UserX className="w-5 h-5" />,     color: '#94a3b8' },
+    { label: 'Super Admins', value: usersList.filter(u => u.role === 'super_admin').length,  icon: <Crown className="w-5 h-5" />,     color: '#f59e0b' },
+  ], [usersList]);
 
-  const filtered = useMemo(() => {
-    return usersList.filter((u) => {
-      return (
-        search === '' ||
-        u.name.toLowerCase().includes(search.toLowerCase()) ||
-        u.email.toLowerCase().includes(search.toLowerCase()) ||
-        (ROLES[u.role] && ROLES[u.role].label.toLowerCase().includes(search.toLowerCase()))
-      );
-    });
-  }, [search, usersList]);
+  const filtered = useMemo(() =>
+    usersList.filter(u =>
+      !search ||
+      u.name.toLowerCase().includes(search.toLowerCase()) ||
+      u.email.toLowerCase().includes(search.toLowerCase()) ||
+      ROLES[u.role]?.label.toLowerCase().includes(search.toLowerCase())
+    ), [search, usersList]);
 
-  const handleOpenDialog = (u: User | null = null) => {
+  const openDialog = (u: User | null = null) => {
+    setFormErrors({});
     if (u) {
       setEditingUser(u);
-      setName(u.name);
-      setEmail(u.email);
-      setUserRole(u.role);
-      setStatus(u.status);
+      setFormName(u.name);
+      setFormEmail(u.email);
+      setFormRole(u.role);
+      setFormStatus(u.status);
     } else {
       setEditingUser(null);
-      setName('');
-      setEmail('');
-      setUserRole('dispatcher');
-      setStatus('active');
+      setFormName('');
+      setFormEmail('');
+      setFormRole('dispatcher');
+      setFormStatus('active');
     }
     setIsOpen(true);
   };
 
-  const handleOpenProfile = (u: User) => {
-    setProfileUser(u);
-    setIsProfileOpen(true);
+  const validateForm = (): boolean => {
+    const errs: Record<string, string> = {};
+    if (!formName.trim())                        errs.name  = 'Full name is required.';
+    if (!formEmail.trim())                       errs.email = 'Email address is required.';
+    else if (!emailRegex.test(formEmail.trim())) errs.email = 'Enter a valid email (e.g. name@company.com).';
+    if (!formRole)                               errs.role  = 'Please select a role.';
+    setFormErrors(errs);
+    return Object.keys(errs).length === 0;
   };
 
-  // Export users to CSV
-  const handleExportCSV = () => {
-    if (usersList.length === 0) {
-      toast.warning('No users to export');
-      return;
-    }
-
-    try {
-      const headers = ['ID', 'Name', 'Email', 'Role', 'Status', 'Last Active'];
-      const rows = usersList.map((u) => [
-        u.id,
-        u.name,
-        u.email,
-        ROLES[u.role]?.label || u.role,
-        u.status,
-        formatDate(u.lastActive),
-      ]);
-
-      const csvContent = [
-        headers.join(','),
-        ...rows.map((row) => row.map((val) => `"${String(val).replace(/"/g, '""')}"`).join(',')),
-      ].join('\n');
-
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.setAttribute('href', url);
-      link.setAttribute('download', `TransitOps_Users_${new Date().toISOString().split('T')[0]}.csv`);
-      link.style.visibility = 'hidden';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-
-      toast.success('Export Successful', {
-        description: 'The user registry has been exported to CSV.',
-      });
-    } catch (err: any) {
-      toast.error('Export Failed', { description: err.message });
-    }
-  };
-
-  // Create or Update user
   const handleSaveUser = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!validateForm()) return;
     setFormLoading(true);
 
+    const isEdit  = !!editingUser;
+    const payload = isEdit
+      ? { id: editingUser.id, name: formName, email: formEmail, role: formRole, status: formStatus }
+      : { name: formName, email: formEmail, role: formRole, status: formStatus };
+
     try {
-      const isEdit = !!editingUser;
-      const url = '/api/users';
-      const method = isEdit ? 'PUT' : 'POST';
-      const bodyPayload = isEdit
-        ? { id: editingUser.id, name, email, role: userRole, status }
-        : { name, email, role: userRole, status };
-
-      const res = await fetch(url, {
-        method,
+      const res  = await fetch('/api/users', {
+        method:  isEdit ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(bodyPayload),
+        body:    JSON.stringify(payload),
       });
-
       const data = await res.json();
 
       if (!res.ok) {
-        throw new Error(data.error || 'Failed to save user');
+        if (data.error?.toLowerCase().includes('email')) {
+          setFormErrors(prev => ({ ...prev, email: data.error }));
+        } else {
+          toast.error('Failed to save user', { description: data.error });
+        }
+        return;
       }
 
-      toast.success(isEdit ? 'User updated successfully' : 'User added successfully', {
-        description: `${name} is now saved in the system.`,
+      toast.success(isEdit ? 'User updated!' : 'User added!', {
+        description: `${formName} has been saved successfully.`,
       });
-
       setIsOpen(false);
-      fetchUsers(); // Refresh list
+      fetchUsers();
     } catch (err: any) {
-      toast.error('Error Saving User', { description: err.message });
+      toast.error('Network error', { description: err.message });
     } finally {
       setFormLoading(false);
     }
   };
 
-  // Toggle user active status (deactivate / activate)
   const handleToggleStatus = async (u: User) => {
+    const newStatus = u.status === 'active' ? 'inactive' : 'active';
     try {
-      const newStatus = u.status === 'active' ? 'inactive' : 'active';
-      const res = await fetch('/api/users', {
-        method: 'PUT',
+      const res  = await fetch('/api/users', {
+        method:  'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: u.id, status: newStatus }),
+        body:    JSON.stringify({ id: u.id, status: newStatus }),
       });
-
       const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to update user status');
-      }
-
-      toast.success(newStatus === 'inactive' ? 'Account deactivated' : 'Account activated', {
-        description: `${u.name}'s status has been updated.`,
-      });
-
+      if (!res.ok) throw new Error(data.error);
+      toast.success(newStatus === 'inactive' ? 'Account deactivated' : 'Account activated');
       fetchUsers();
     } catch (err: any) {
-      toast.error('Status Update Error', { description: err.message });
+      toast.error('Status Error', { description: err.message });
     }
   };
 
-  // Permanently delete user
-  const handleDeleteUser = async (id: string) => {
-    if (!confirm('Are you sure you want to permanently delete this user?')) return;
-
+  const handleDeleteUser = async (id: string, name: string) => {
+    if (!confirm(`Permanently delete "${name}"? This cannot be undone.`)) return;
     try {
-      const res = await fetch(`/api/users?id=${id}`, {
-        method: 'DELETE',
-      });
-
+      const res  = await fetch(`/api/users?id=${id}`, { method: 'DELETE' });
       const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to delete user');
-      }
-
-      toast.success('User deleted', {
-        description: 'The user account was removed from the database.',
-      });
-
+      if (!res.ok) throw new Error(data.error);
+      toast.success('User deleted', { description: `${name} has been removed.` });
       fetchUsers();
     } catch (err: any) {
       toast.error('Deletion Error', { description: err.message });
     }
   };
 
-  const formatDate = (iso: string) => {
-    return new Date(iso).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-    });
+  const handleExportCSV = () => {
+    if (usersList.length === 0) { toast.warning('No users to export'); return; }
+
+    const headers = ['ID', 'Name', 'Email', 'Role', 'Status', 'Last Active'];
+    const rows    = usersList.map(u => [
+      u.id, u.name, u.email,
+      ROLES[u.role]?.label || u.role,
+      u.status,
+      formatDate(u.lastActive),
+    ]);
+    const csv  = [headers, ...rows]
+      .map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `TransitOps_Users_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast.success('Export complete!', { description: `${usersList.length} users exported as CSV.` });
   };
 
   return (
     <DashboardLayout>
       <PageHeader
         title="User Management"
-        description="Manage user accounts, roles, and access permissions."
+        description="Manage user accounts, roles, and PostgreSQL-backed access control."
       >
-        <Button variant="outline" size="sm" onClick={handleExportCSV}>
-          <Download className="w-4 h-4 mr-2" /> Export
+        <Button
+          id="export-users-csv"
+          variant="outline"
+          size="sm"
+          onClick={handleExportCSV}
+          className="gap-2 border-emerald-500/40 text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-950"
+        >
+          <FileSpreadsheet className="w-4 h-4" />
+          Export CSV
         </Button>
+
         {canCreate && (
-          <Button size="sm" onClick={() => handleOpenDialog(null)}>
-            <UserPlus className="w-4 h-4 mr-2" /> Add User
+          <Button id="add-user-btn" size="sm" onClick={() => openDialog(null)} className="gap-2">
+            <UserPlus className="w-4 h-4" />
+            Add User
           </Button>
         )}
       </PageHeader>
 
-      {/* Stats Cards */}
+      {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
         {stats.map((s, i) => (
-          <motion.div
-            key={s.label}
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.05 }}
-          >
-            <Card className="p-4 hover:shadow-elevation-2 transition-shadow">
+          <motion.div key={s.label} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.06 }}>
+            <Card className="p-4 hover:shadow-md transition-shadow cursor-default">
               <div className="flex items-center gap-3">
-                <div
-                  className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0"
-                  style={{ backgroundColor: `${s.color}15`, color: s.color }}
-                >
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: `${s.color}18`, color: s.color }}>
                   {s.icon}
                 </div>
                 <div>
@@ -348,114 +317,139 @@ export default function UsersPage() {
       {/* Search */}
       <Card className="mb-4">
         <CardContent className="p-4">
-          <div className="relative">
+          <div className="relative max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input
               placeholder="Search by name, email, or role..."
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-10 max-w-md"
+              onChange={e => setSearch(e.target.value)}
+              className="pl-10"
             />
           </div>
         </CardContent>
       </Card>
 
-      {/* Users Table */}
+      {/* Table */}
       {loadingUsers ? (
-        <Card className="p-12 flex flex-col items-center justify-center min-h-[300px]">
-          <Loader2 className="w-8 h-8 animate-spin text-primary mb-2" />
-          <p className="text-sm text-muted-foreground">Loading users list...</p>
+        <Card className="flex flex-col items-center justify-center min-h-[300px]">
+          <Loader2 className="w-8 h-8 animate-spin text-primary mb-3" />
+          <p className="text-sm text-muted-foreground">Loading users from database...</p>
         </Card>
       ) : (
         <Card>
-          <div className="overflow-x-auto scrollbar-thin">
+          <div className="overflow-x-auto">
             <Table>
               <TableHeader>
-                <TableRow className="bg-muted/50 hover:bg-muted/50">
-                  <TableHead className="pl-4">User</TableHead>
+                <TableRow className="bg-muted/40 hover:bg-muted/40">
+                  <TableHead className="pl-4 w-[280px]">User</TableHead>
                   <TableHead>Role</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Last Active</TableHead>
-                  <TableHead className="w-[60px]"></TableHead>
+                  <TableHead className="w-12" />
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filtered.map((u) => (
-                  <TableRow key={u.id} className="hover:bg-accent/30">
-                    <TableCell className="pl-4">
-                      <div className="flex items-center gap-3">
-                        <Avatar className="w-9 h-9 shrink-0">
-                          <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
-                            {u.avatar}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium">{u.name}</p>
-                          <p className="text-xs text-muted-foreground flex items-center gap-1">
-                            <Mail className="w-3 h-3" /> {u.email}
-                          </p>
+                <AnimatePresence initial={false}>
+                  {filtered.map((u, i) => (
+                    <motion.tr
+                      key={u.id}
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -6 }}
+                      transition={{ delay: i * 0.03 }}
+                      className="border-b border-border last:border-0 hover:bg-accent/30 transition-colors"
+                    >
+                      <TableCell className="pl-4">
+                        <div className="flex items-center gap-3">
+                          <Avatar className="w-9 h-9 shrink-0">
+                            <AvatarFallback
+                              className="text-xs font-bold"
+                              style={{
+                                backgroundColor: `${ROLES[u.role]?.color ?? '#6366f1'}18`,
+                                color: ROLES[u.role]?.color ?? '#6366f1',
+                              }}
+                            >
+                              {u.avatar}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold truncate">{u.name}</p>
+                            <p className="text-xs text-muted-foreground flex items-center gap-1 truncate">
+                              <Mail className="w-3 h-3 shrink-0" /> {u.email}
+                            </p>
+                          </div>
                         </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      {ROLES[u.role] ? (
-                        <Badge
-                          variant="outline"
-                          className="text-xs"
-                          style={{
-                            borderColor: `${ROLES[u.role].color}30`,
+                      </TableCell>
+
+                      <TableCell>
+                        {ROLES[u.role] ? (
+                          <Badge variant="outline" className="text-xs gap-1" style={{
+                            borderColor: `${ROLES[u.role].color}35`,
                             color: ROLES[u.role].color,
                             backgroundColor: `${ROLES[u.role].color}10`,
-                          }}
-                        >
-                          <Shield className="w-3 h-3 mr-1" />
-                          {ROLES[u.role].label}
-                        </Badge>
-                      ) : (
-                        <Badge variant="outline" className="text-xs">{u.role}</Badge>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <StatusBadge status={u.status} />
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {formatDate(u.lastActive)}
-                    </TableCell>
-                    <TableCell>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8">
-                            <MoreHorizontal className="w-4 h-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => handleOpenProfile(u)}>
-                            View Profile
-                          </DropdownMenuItem>
-                          {canEdit && (
-                            <DropdownMenuItem onClick={() => handleOpenDialog(u)}>
-                              Edit User
-                            </DropdownMenuItem>
-                          )}
-                          {canEdit && (
-                            <DropdownMenuItem onClick={() => handleToggleStatus(u)}>
-                              {u.status === 'active' ? 'Deactivate' : 'Activate'}
-                            </DropdownMenuItem>
-                          )}
-                          <DropdownMenuSeparator />
-                          {canDelete && (
+                          }}>
+                            <Shield className="w-3 h-3" />
+                            {ROLES[u.role].label}
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-xs">{u.role}</Badge>
+                        )}
+                      </TableCell>
+
+                      <TableCell><StatusBadge status={u.status} /></TableCell>
+
+                      <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                        {formatDate(u.lastActive)}
+                      </TableCell>
+
+                      <TableCell>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-8 w-8">
+                              <MoreHorizontal className="w-4 h-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-44">
                             <DropdownMenuItem
-                              className="text-destructive font-medium"
-                              onClick={() => handleDeleteUser(u.id)}
+                              id={`view-profile-${u.id}`}
+                              onClick={() => { setProfileUser(u); setIsProfileOpen(true); }}
+                              className="gap-2 cursor-pointer"
                             >
-                              Delete User
+                              <Eye className="w-3.5 h-3.5" /> View Profile
                             </DropdownMenuItem>
-                          )}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
-                ))}
+
+                            {canEdit && (
+                              <DropdownMenuItem onClick={() => openDialog(u)} className="gap-2 cursor-pointer">
+                                <KeyRound className="w-3.5 h-3.5" /> Edit User
+                              </DropdownMenuItem>
+                            )}
+
+                            {canEdit && (
+                              <DropdownMenuItem onClick={() => handleToggleStatus(u)} className="gap-2 cursor-pointer">
+                                {u.status === 'active'
+                                  ? <><XCircle className="w-3.5 h-3.5" /> Deactivate</>
+                                  : <><CheckCircle2 className="w-3.5 h-3.5" /> Activate</>
+                                }
+                              </DropdownMenuItem>
+                            )}
+
+                            {canDelete && (
+                              <>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  className="text-destructive gap-2 cursor-pointer"
+                                  onClick={() => handleDeleteUser(u.id, u.name)}
+                                >
+                                  <X className="w-3.5 h-3.5" /> Delete User
+                                </DropdownMenuItem>
+                              </>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </motion.tr>
+                  ))}
+                </AnimatePresence>
               </TableBody>
             </Table>
           </div>
@@ -464,213 +458,270 @@ export default function UsersPage() {
             <EmptyState
               icon={<Users className="w-7 h-7" />}
               title="No users found"
-              description="Try adjusting your search to find what you're looking for."
-              action={
-                <Button variant="outline" size="sm" onClick={() => setSearch('')}>
-                  Clear Search
-                </Button>
-              }
+              description="Try adjusting your search query."
+              action={<Button variant="outline" size="sm" onClick={() => setSearch('')}>Clear Search</Button>}
             />
           )}
 
           {filtered.length > 0 && (
-            <div className="flex items-center justify-between px-4 py-3 border-t">
-              <p className="text-sm text-muted-foreground">
-                Showing {filtered.length} of {usersList.length} users
-              </p>
+            <div className="flex items-center justify-between px-4 py-3 border-t text-xs text-muted-foreground">
+              <span>Showing {filtered.length} of {usersList.length} users</span>
+              <span className="hidden sm:block">PostgreSQL database</span>
             </div>
           )}
         </Card>
       )}
 
-      {/* Add / Edit Dialog */}
-      <Dialog open={isOpen} onOpenChange={setIsOpen}>
-        <DialogContent className="sm:max-w-[425px]">
+      {/* ===== Add / Edit Dialog ===== */}
+      <Dialog open={isOpen} onOpenChange={v => { if (!formLoading) setIsOpen(v); }}>
+        <DialogContent className="sm:max-w-[430px]">
           <DialogHeader>
-            <DialogTitle>{editingUser ? 'Edit User Details' : 'Add New User'}</DialogTitle>
+            <DialogTitle>{editingUser ? 'Edit User' : 'Add New User'}</DialogTitle>
             <DialogDescription>
               {editingUser
-                ? "Update user profile information, role status, and access settings."
-                : "Create a new user account profile and assign a role to define system permissions."}
+                ? "Update the user's profile, role, or account status."
+                : 'Fill in the details below to create a new user account.'}
             </DialogDescription>
           </DialogHeader>
 
-          <form onSubmit={handleSaveUser} className="space-y-4 py-2">
-            <div className="space-y-1">
-              <Label htmlFor="name" className="text-xs font-semibold">Full Name</Label>
+          <form onSubmit={handleSaveUser} noValidate className="space-y-4 pt-2">
+            {/* Name */}
+            <div className="space-y-1.5">
+              <Label htmlFor="form-name" className="text-xs font-semibold">
+                Full Name <span className="text-destructive">*</span>
+              </Label>
               <Input
-                id="name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
+                id="form-name"
+                value={formName}
+                onChange={e => { setFormName(e.target.value); setFormErrors(p => ({ ...p, name: '' })); }}
                 placeholder="e.g. John Doe"
-                className="h-10"
-                required
+                className={cn('h-10', formErrors.name && 'border-destructive focus-visible:ring-destructive')}
               />
+              {formErrors.name && (
+                <p className="text-xs text-destructive flex items-center gap-1">
+                  <AlertCircle className="w-3 h-3" /> {formErrors.name}
+                </p>
+              )}
             </div>
 
-            <div className="space-y-1">
-              <Label htmlFor="email" className="text-xs font-semibold">Email Address</Label>
+            {/* Email */}
+            <div className="space-y-1.5">
+              <Label htmlFor="form-email" className="text-xs font-semibold">
+                Email Address <span className="text-destructive">*</span>
+              </Label>
               <Input
-                id="email"
+                id="form-email"
                 type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                value={formEmail}
+                onChange={e => { setFormEmail(e.target.value); setFormErrors(p => ({ ...p, email: '' })); }}
                 placeholder="e.g. john.doe@company.com"
-                className="h-10"
-                required
+                className={cn('h-10', formErrors.email && 'border-destructive focus-visible:ring-destructive')}
               />
+              {formErrors.email && (
+                <p className="text-xs text-destructive flex items-center gap-1">
+                  <AlertCircle className="w-3 h-3" /> {formErrors.email}
+                </p>
+              )}
             </div>
 
-            <div className="space-y-1">
-              <Label htmlFor="role" className="text-xs font-semibold">System Access Role</Label>
+            {/* Role */}
+            <div className="space-y-1.5">
+              <Label htmlFor="form-role" className="text-xs font-semibold">
+                System Role <span className="text-destructive">*</span>
+              </Label>
               <select
-                id="role"
-                value={userRole}
-                onChange={(e) => setUserRole(e.target.value as Role)}
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                id="form-role"
+                value={formRole}
+                onChange={e => { setFormRole(e.target.value as Role); setFormErrors(p => ({ ...p, role: '' })); }}
+                className={cn(
+                  'flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+                  formErrors.role && 'border-destructive'
+                )}
               >
                 {Object.entries(ROLES).map(([key, r]) => (
-                  <option key={key} value={key}>
-                    {r.label}
-                  </option>
+                  <option key={key} value={key}>{r.label}</option>
                 ))}
               </select>
+              {formErrors.role && (
+                <p className="text-xs text-destructive flex items-center gap-1">
+                  <AlertCircle className="w-3 h-3" /> {formErrors.role}
+                </p>
+              )}
             </div>
 
-            <div className="space-y-1">
-              <Label htmlFor="status" className="text-xs font-semibold">Account Login Status</Label>
+            {/* Status */}
+            <div className="space-y-1.5">
+              <Label htmlFor="form-status" className="text-xs font-semibold">Account Status</Label>
               <select
-                id="status"
-                value={status}
-                onChange={(e) => setStatus(e.target.value as 'active' | 'inactive')}
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                id="form-status"
+                value={formStatus}
+                onChange={e => setFormStatus(e.target.value as 'active' | 'inactive')}
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
               >
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
+                <option value="active">Active - can log in</option>
+                <option value="inactive">Inactive - login blocked</option>
               </select>
             </div>
 
-            <DialogFooter className="pt-4 gap-2">
-              <Button type="button" variant="outline" onClick={() => setIsOpen(false)} disabled={formLoading}>
+            <DialogFooter className="pt-2 gap-2">
+              <Button type="button" variant="ghost" onClick={() => setIsOpen(false)} disabled={formLoading}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={formLoading}>
-                {formLoading ? 'Saving...' : 'Save User'}
+              <Button type="submit" disabled={formLoading} className="min-w-[100px]">
+                {formLoading
+                  ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Saving...</>
+                  : 'Save User'
+                }
               </Button>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
 
-      {/* View Profile Dialog */}
+      {/* ===== View Profile Dialog ===== */}
       <Dialog open={isProfileOpen} onOpenChange={setIsProfileOpen}>
-        <DialogContent className="sm:max-w-[450px]">
-          <DialogHeader>
-            <DialogTitle>User Profile Details</DialogTitle>
-            <DialogDescription>
-              Detailed account overview and access authorization levels.
-            </DialogDescription>
-          </DialogHeader>
+        <DialogContent className="sm:max-w-[480px] p-0 overflow-hidden">
+          {profileUser && (() => {
+            const roleData   = ROLES[profileUser.role];
+            const perms      = getRolePermissions(profileUser.role);
+            const accessible = Object.entries(perms).filter(([, p]) => p && p !== 'none');
+            const restricted = (Object.keys(MODULE_LABELS) as ModuleKey[]).filter(m => !perms[m] || perms[m] === 'none');
 
-          {profileUser && (
-            <div className="space-y-6 py-4">
-              {/* Header profile info */}
-              <div className="flex items-center gap-4">
-                <Avatar className="w-16 h-16 border-2 border-border shrink-0">
-                  <AvatarFallback className="bg-primary/10 text-primary text-xl font-bold">
-                    {profileUser.avatar}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="min-w-0">
-                  <h3 className="text-lg font-bold truncate">{profileUser.name}</h3>
-                  <p className="text-sm text-muted-foreground flex items-center gap-1.5 truncate">
-                    <Mail className="w-3.5 h-3.5" /> {profileUser.email}
-                  </p>
-                </div>
-              </div>
+            return (
+              <>
+                {/* Header */}
+                <div
+                  className="relative px-6 pt-8 pb-6"
+                  style={{ background: `linear-gradient(135deg, ${roleData?.color ?? '#6366f1'}22 0%, ${roleData?.color ?? '#6366f1'}08 100%)` }}
+                >
+                  <button
+                    onClick={() => setIsProfileOpen(false)}
+                    className="absolute top-4 right-4 p-1.5 rounded-lg hover:bg-black/10 text-muted-foreground transition-colors"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
 
-              {/* Grid info */}
-              <div className="grid grid-cols-2 gap-4 border-y py-4 border-border text-sm">
-                <div>
-                  <p className="text-xs text-muted-foreground font-semibold">Security Role</p>
-                  <div className="mt-1">
-                    {ROLES[profileUser.role] ? (
-                      <Badge
-                        variant="outline"
-                        style={{
-                          borderColor: `${ROLES[profileUser.role].color}30`,
-                          color: ROLES[profileUser.role].color,
-                          backgroundColor: `${ROLES[profileUser.role].color}10`,
-                        }}
+                  <div className="flex items-center gap-4">
+                    <Avatar className="w-16 h-16 border-2" style={{ borderColor: `${roleData?.color ?? '#6366f1'}40` }}>
+                      <AvatarFallback
+                        className="text-xl font-bold"
+                        style={{ backgroundColor: `${roleData?.color ?? '#6366f1'}20`, color: roleData?.color ?? '#6366f1' }}
                       >
-                        <Shield className="w-3 h-3 mr-1" />
-                        {ROLES[profileUser.role].label}
-                      </Badge>
-                    ) : (
-                      <Badge variant="outline">{profileUser.role}</Badge>
+                        {profileUser.avatar}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="min-w-0">
+                      <h2 className="text-lg font-bold truncate">{profileUser.name}</h2>
+                      <p className="text-sm text-muted-foreground flex items-center gap-1.5 truncate">
+                        <Mail className="w-3.5 h-3.5 shrink-0" /> {profileUser.email}
+                      </p>
+                      <div className="flex items-center gap-2 mt-2 flex-wrap">
+                        {roleData && (
+                          <Badge variant="outline" className="text-xs gap-1"
+                            style={{ borderColor: `${roleData.color}40`, color: roleData.color, backgroundColor: `${roleData.color}15` }}>
+                            <Shield className="w-3 h-3" /> {roleData.label}
+                          </Badge>
+                        )}
+                        <StatusBadge status={profileUser.status} />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Body */}
+                <div className="px-6 pb-6 space-y-5 max-h-[55vh] overflow-y-auto">
+                  {/* Meta */}
+                  <div className="grid grid-cols-2 gap-4 pt-4 text-sm">
+                    <div>
+                      <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide mb-1">Account ID</p>
+                      <p className="font-mono font-semibold text-foreground">{profileUser.id}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide mb-1">Last Active</p>
+                      <p className="font-medium text-foreground text-xs">{formatDate(profileUser.lastActive)}</p>
+                    </div>
+                    {roleData && (
+                      <div className="col-span-2">
+                        <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide mb-1">Role Description</p>
+                        <p className="text-xs text-foreground">{roleData.description}</p>
+                      </div>
                     )}
                   </div>
-                </div>
 
-                <div>
-                  <p className="text-xs text-muted-foreground font-semibold">Account Status</p>
-                  <div className="mt-1">
-                    <StatusBadge status={profileUser.status} />
+                  {/* Accessible modules */}
+                  <div>
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                      Accessible Modules ({accessible.length})
+                    </p>
+                    {accessible.length === 0
+                      ? <p className="text-xs text-muted-foreground italic">No modules accessible.</p>
+                      : (
+                        <div className="flex flex-wrap gap-1.5">
+                          {accessible.map(([mod, perm]) => (
+                            <div key={mod} className="flex items-center gap-1.5 px-2 py-1 rounded-lg border border-border bg-card text-xs">
+                              <span className="font-medium text-foreground">{MODULE_LABELS[mod as ModuleKey]}</span>
+                              <span className={cn(
+                                'inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-bold border',
+                                PERMISSION_COLORS[perm as Permission]
+                              )}>
+                                {PERMISSION_LABELS[perm as Permission]}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )
+                    }
+                  </div>
+
+                  {/* Restricted modules */}
+                  {restricted.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                        <Lock className="w-3.5 h-3.5 text-destructive/60" />
+                        Restricted Modules ({restricted.length})
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {restricted.map(mod => (
+                          <div key={mod} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-muted text-muted-foreground text-xs">
+                            <Lock className="w-3 h-3" /> {MODULE_LABELS[mod]}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Summary stats */}
+                  <div className="grid grid-cols-3 gap-3 pt-3 border-t border-border">
+                    <div className="text-center p-3 rounded-xl bg-emerald-500/10">
+                      <p className="text-xl font-bold text-emerald-600">{accessible.length}</p>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">Accessible</p>
+                    </div>
+                    <div className="text-center p-3 rounded-xl bg-primary/10">
+                      <p className="text-xl font-bold text-primary">
+                        {accessible.filter(([, p]) => p === 'full').length}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">Full Access</p>
+                    </div>
+                    <div className="text-center p-3 rounded-xl bg-destructive/10">
+                      <p className="text-xl font-bold text-destructive">{restricted.length}</p>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">Restricted</p>
+                    </div>
                   </div>
                 </div>
 
-                <div>
-                  <p className="text-xs text-muted-foreground font-semibold">Account ID</p>
-                  <p className="mt-1 font-mono font-medium text-foreground">{profileUser.id}</p>
+                {/* Footer */}
+                <div className="flex justify-end gap-2 px-6 py-4 border-t border-border bg-muted/20">
+                  {canEdit && (
+                    <Button size="sm" variant="outline" onClick={() => { setIsProfileOpen(false); openDialog(profileUser); }}>
+                      Edit User
+                    </Button>
+                  )}
+                  <Button size="sm" onClick={() => setIsProfileOpen(false)}>Close</Button>
                 </div>
-
-                <div>
-                  <p className="text-xs text-muted-foreground font-semibold">Last Active Connection</p>
-                  <p className="mt-1 text-xs text-foreground font-medium">{formatDate(profileUser.lastActive)}</p>
-                </div>
-              </div>
-
-              {/* Permissions overview based on role */}
-              <div>
-                <p className="text-xs text-muted-foreground font-semibold mb-2">Module Access Privileges</p>
-                <div className="flex flex-wrap gap-1.5 max-h-[140px] overflow-y-auto pr-1 scrollbar-thin">
-                  {(() => {
-                    const stored = typeof window !== 'undefined' ? localStorage.getItem('transitops-permissions') : null;
-                    let matrix = PERMISSION_MATRIX;
-                    if (stored) {
-                      try {
-                        matrix = JSON.parse(stored);
-                      } catch {}
-                    }
-                    const perms = matrix[profileUser.role] || {};
-                    const accessible = Object.entries(perms).filter(([, p]) => p && p !== 'none');
-
-                    if (accessible.length === 0) {
-                      return <span className="text-xs text-muted-foreground italic">No modules accessible.</span>;
-                    }
-
-                    return accessible.map(([mod, perm]) => (
-                      <div key={mod} className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-border text-xs bg-accent/10">
-                        <span className="font-medium text-xs">{MODULE_LABELS[mod as ModuleKey]}</span>
-                        <span className={cn(
-                          'inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-semibold border',
-                          PERMISSION_COLORS[perm as Permission]
-                        )}>
-                          {PERMISSION_LABELS[perm as Permission]}
-                        </span>
-                      </div>
-                    ));
-                  })()}
-                </div>
-              </div>
-            </div>
-          )}
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsProfileOpen(false)}>
-              Close Card
-            </Button>
-          </DialogFooter>
+              </>
+            );
+          })()}
         </DialogContent>
       </Dialog>
     </DashboardLayout>

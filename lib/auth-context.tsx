@@ -8,6 +8,7 @@ import { AuthUser, DEFAULT_USERS } from './users';
 interface AuthContextValue {
   user: AuthUser | null;
   isAuthenticated: boolean;
+  isLoading: boolean;
   login: (user: AuthUser) => void;
   logout: () => void;
   switchRole: (role: Role) => void;
@@ -19,15 +20,20 @@ const STORAGE_KEY = 'transitops-auth';
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [isLoading, setIsLoading] = useState(true); // true until localStorage is read
 
   useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      try {
+    // Restore session from localStorage BEFORE any redirect decisions are made
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
         setUser(JSON.parse(stored));
-      } catch {
-        localStorage.removeItem(STORAGE_KEY);
       }
+    } catch {
+      localStorage.removeItem(STORAGE_KEY);
+    } finally {
+      // Mark loading done — DashboardLayout will now decide whether to redirect
+      setIsLoading(false);
     }
 
     // Fetch latest permissions matrix from backend and cache it locally
@@ -58,7 +64,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated: !!user, login, logout, switchRole }}>
+    <AuthContext.Provider value={{ user, isAuthenticated: !!user, isLoading, login, logout, switchRole }}>
       {children}
     </AuthContext.Provider>
   );
