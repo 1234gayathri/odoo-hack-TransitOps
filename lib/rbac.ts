@@ -62,7 +62,6 @@ export const MODULES: ModuleKey[] = [
   'reports',
   'analytics',
   'notifications',
-  'audit',
   'settings',
   'profile',
 ];
@@ -81,7 +80,6 @@ export const MODULE_LABELS: Record<ModuleKey, string> = {
   reports: 'Reports',
   analytics: 'Analytics',
   notifications: 'Notifications',
-  audit: 'Audit Logs',
   settings: 'Settings',
   profile: 'Profile',
 };

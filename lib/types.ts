@@ -20,7 +20,6 @@ export type ModuleKey =
   | 'reports'
   | 'analytics'
   | 'notifications'
-  | 'audit'
   | 'settings'
   | 'profile';
 
@@ -111,6 +110,11 @@ export interface MaintenanceRecord {
   cost: number;
   technician: string;
   serviceDocuments?: ServiceDocument[];
+  invoiceUrl?: string | null;
+  actualCost?: number | null;
+  vendor?: string | null;
+  approvalStatus?: string;
+  rejectionComments?: string | null;
 }
 
 export interface FuelLog {

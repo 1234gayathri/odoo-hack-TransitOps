@@ -62,7 +62,6 @@ const COMMAND_ITEMS: { key: ModuleKey; label: string; icon: any }[] = [
   { key: 'reports', label: 'Reports', icon: Search },
   { key: 'analytics', label: 'Analytics', icon: Search },
   { key: 'notifications', label: 'Notifications', icon: Bell },
-  { key: 'audit', label: 'Audit Logs', icon: Search },
   { key: 'settings', label: 'Settings', icon: Settings },
   { key: 'profile', label: 'Profile', icon: User },
 ];

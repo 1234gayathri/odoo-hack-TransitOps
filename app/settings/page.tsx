@@ -1,23 +1,19 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
 import {
   Settings,
   Palette,
   Bell,
-  Shield,
   Sun,
   Moon,
   Monitor,
   Globe,
   Clock,
   Building,
-  Lock,
-  KeyRound,
-  Smartphone,
   Mail,
-  CheckCircle2,
+  Smartphone,
+  Loader2,
 } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/dashboard-layout';
 import { PageHeader } from '@/components/shared/page-components';
@@ -61,6 +57,8 @@ const LANGUAGES = [
 export default function SettingsPage() {
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
   // General settings
   const [language, setLanguage] = useState('en');
@@ -76,17 +74,67 @@ export default function SettingsPage() {
   const [inAppNotifs, setInAppNotifs] = useState(true);
   const [weeklyDigest, setWeeklyDigest] = useState(false);
 
-  // Security
-  const [twoFactor, setTwoFactor] = useState(false);
-  const [sessionTimeout, setSessionTimeout] = useState('30');
-  const [passwordPolicy, setPasswordPolicy] = useState('strict');
+  const fetchSettings = async () => {
+    try {
+      setLoading(true);
+      const res = await fetch('/api/settings');
+      const data = await res.json();
+      if (res.ok && data.settings) {
+        const s = data.settings;
+        if (s.language) setLanguage(s.language);
+        if (s.timezone) setTimezone(s.timezone);
+        if (s.workspaceName) setWorkspaceName(s.workspaceName);
+        if (s.density) setDensity(s.density as any);
+        if (s.emailNotifs) setEmailNotifs(s.emailNotifs === 'true');
+        if (s.pushNotifs) setPushNotifs(s.pushNotifs === 'true');
+        if (s.inAppNotifs) setInAppNotifs(s.inAppNotifs === 'true');
+        if (s.weeklyDigest) setWeeklyDigest(s.weeklyDigest === 'true');
+      }
+    } catch (err: any) {
+      toast.error('Failed to load settings');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     setMounted(true);
+    fetchSettings();
   }, []);
 
-  const handleSave = (section: string) => {
-    toast.success(`${section} settings saved successfully`);
+  const handleSave = async (section: string) => {
+    setSaving(true);
+    try {
+      let settingsObj: Record<string, string> = {};
+      
+      if (section === 'General') {
+        settingsObj = { language, timezone, workspaceName };
+      } else if (section === 'Appearance') {
+        settingsObj = { density };
+      } else if (section === 'Notification') {
+        settingsObj = { 
+          emailNotifs: String(emailNotifs), 
+          pushNotifs: String(pushNotifs), 
+          inAppNotifs: String(inAppNotifs), 
+          weeklyDigest: String(weeklyDigest) 
+        };
+      }
+
+      const res = await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ settings: settingsObj })
+      });
+      if (res.ok) {
+        toast.success(`${section} settings saved successfully`);
+      } else {
+        toast.error(`Failed to save ${section} settings`);
+      }
+    } catch (err: any) {
+      toast.error('Network Error', { description: err.message });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const themeOptions = [
@@ -94,6 +142,21 @@ export default function SettingsPage() {
     { value: 'dark', label: 'Dark', icon: Moon },
     { value: 'system', label: 'System', icon: Monitor },
   ];
+
+  if (loading) {
+    return (
+      <DashboardLayout>
+        <PageHeader
+          title="Settings"
+          description="Configure your workspace, preferences, and system configuration."
+        />
+        <Card className="flex flex-col items-center justify-center min-h-[400px]">
+          <Loader2 className="w-8 h-8 animate-spin text-primary mb-3" />
+          <p className="text-sm text-muted-foreground">Loading workspace configuration...</p>
+        </Card>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>
@@ -112,9 +175,6 @@ export default function SettingsPage() {
           </TabsTrigger>
           <TabsTrigger value="notifications" className="gap-2">
             <Bell className="w-4 h-4" /> Notifications
-          </TabsTrigger>
-          <TabsTrigger value="security" className="gap-2">
-            <Shield className="w-4 h-4" /> Security
           </TabsTrigger>
         </TabsList>
 
@@ -199,8 +259,8 @@ export default function SettingsPage() {
               </div>
 
               <div className="flex justify-end pt-2">
-                <Button onClick={() => handleSave('General')}>
-                  Save Changes
+                <Button onClick={() => handleSave('General')} disabled={saving}>
+                  {saving ? 'Saving...' : 'Save Changes'}
                 </Button>
               </div>
             </CardContent>
@@ -287,8 +347,8 @@ export default function SettingsPage() {
               </div>
 
               <div className="flex justify-end pt-2">
-                <Button onClick={() => handleSave('Appearance')}>
-                  Save Changes
+                <Button onClick={() => handleSave('Appearance')} disabled={saving}>
+                  {saving ? 'Saving...' : 'Save Changes'}
                 </Button>
               </div>
             </CardContent>
@@ -370,117 +430,8 @@ export default function SettingsPage() {
               </div>
 
               <div className="flex justify-end pt-2">
-                <Button onClick={() => handleSave('Notification')}>
-                  Save Changes
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Security Tab */}
-        <TabsContent value="security">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Security & Access</CardTitle>
-              <CardDescription className="text-xs">
-                Configure authentication, session policies, and password requirements.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-1">
-              {/* 2FA */}
-              <div className="flex items-center justify-between py-4 border-b border-border">
-                <div className="flex items-start gap-3">
-                  <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-                    <KeyRound className="w-5 h-5 text-primary" />
-                  </div>
-                  <div>
-                    <Label className="text-sm font-medium">Two-Factor Authentication</Label>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      Require a verification code in addition to your password
-                    </p>
-                  </div>
-                </div>
-                <Switch checked={twoFactor} onCheckedChange={setTwoFactor} />
-              </div>
-
-              {/* Session Timeout */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 py-4 border-b border-border">
-                <div className="flex items-start gap-3">
-                  <div className="w-10 h-10 rounded-lg bg-chart-5/10 flex items-center justify-center shrink-0" style={{ backgroundColor: 'hsl(var(--chart-5) / 0.1)' }}>
-                    <Clock className="w-5 h-5" style={{ color: 'hsl(var(--chart-5))' }} />
-                  </div>
-                  <div>
-                    <Label className="text-sm font-medium">Session Timeout</Label>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      Automatically log out after a period of inactivity
-                    </p>
-                  </div>
-                </div>
-                <Select value={sessionTimeout} onValueChange={setSessionTimeout}>
-                  <SelectTrigger className="w-full sm:w-[180px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="15">15 minutes</SelectItem>
-                    <SelectItem value="30">30 minutes</SelectItem>
-                    <SelectItem value="60">1 hour</SelectItem>
-                    <SelectItem value="240">4 hours</SelectItem>
-                    <SelectItem value="0">Never</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Password Policy */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 py-4">
-                <div className="flex items-start gap-3">
-                  <div className="w-10 h-10 rounded-lg bg-destructive/10 flex items-center justify-center shrink-0">
-                    <Lock className="w-5 h-5 text-destructive" />
-                  </div>
-                  <div>
-                    <Label className="text-sm font-medium">Password Policy</Label>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      Enforce password complexity requirements
-                    </p>
-                  </div>
-                </div>
-                <Select value={passwordPolicy} onValueChange={setPasswordPolicy}>
-                  <SelectTrigger className="w-full sm:w-[180px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="basic">Basic (8+ chars)</SelectItem>
-                    <SelectItem value="strict">Strict (12+ chars, mixed)</SelectItem>
-                    <SelectItem value="maximum">Maximum (16+ chars, symbols)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Security Status */}
-              <div className="mt-6 p-4 rounded-lg border border-border bg-muted/30">
-                <div className="flex items-center gap-2 mb-3">
-                  <CheckCircle2 className="w-4 h-4 text-success" />
-                  <p className="text-sm font-medium">Security Status</p>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                  <div className="flex items-center gap-2">
-                    <span className={cn('w-2 h-2 rounded-full', twoFactor ? 'bg-success' : 'bg-warning')} />
-                    <span className="text-muted-foreground">2FA: {twoFactor ? 'Enabled' : 'Disabled'}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-success" />
-                    <span className="text-muted-foreground">SSL Encrypted</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-success" />
-                    <span className="text-muted-foreground">Audit Logging Active</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex justify-end pt-4">
-                <Button onClick={() => handleSave('Security')}>
-                  Save Changes
+                <Button onClick={() => handleSave('Notification')} disabled={saving}>
+                  {saving ? 'Saving...' : 'Save Changes'}
                 </Button>
               </div>
             </CardContent>

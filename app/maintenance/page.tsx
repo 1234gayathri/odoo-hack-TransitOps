@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useMemo, useRef } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
-  Wrench, Plus, Download, Search, Calendar, DollarSign, Eye, Edit, Trash2,
-  MoreHorizontal, AlertTriangle, History, FileText, X, Upload, Paperclip,
+  Wrench, Plus, Download, Search, Calendar, DollarSign, History, Edit, Trash2, Loader2, FileSpreadsheet,
+  CheckCircle2, XCircle, FileText, ArrowRight, AlertCircle, FileCheck, AlertTriangle
 } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/dashboard-layout';
 import { PageHeader, StatusBadge, EmptyState } from '@/components/shared/page-components';
@@ -17,7 +17,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue
 } from '@/components/ui/select';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
@@ -26,14 +26,11 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
-import { maintenanceRecords as initialRecords, maintenanceTimelineData, vehicles } from '@/lib/mock-data';
-import type { MaintenanceRecord, MaintenanceStatus, MaintenancePriority, ServiceDocument } from '@/lib/types';
+import type { MaintenanceRecord, MaintenanceStatus, MaintenancePriority, Vehicle } from '@/lib/types';
 import { useAuth } from '@/lib/auth-context';
 import { hasPermission } from '@/lib/rbac';
 import { cn } from '@/lib/utils';
@@ -68,7 +65,11 @@ interface FormState {
   scheduledDate: string;
   cost: string;
   technician: string;
-  serviceDocuments: ServiceDocument[];
+  invoiceUrl: string;
+  actualCost: string;
+  vendor: string;
+  approvalStatus: string;
+  rejectionComments: string;
 }
 
 const emptyForm: FormState = {
@@ -80,26 +81,76 @@ const emptyForm: FormState = {
   scheduledDate: '',
   cost: '',
   technician: '',
-  serviceDocuments: [],
+  invoiceUrl: '',
+  actualCost: '',
+  vendor: '',
+  approvalStatus: 'none',
+  rejectionComments: '',
 };
 
 export default function MaintenancePage() {
   const { user } = useAuth();
   const role = user?.role || 'super_admin';
+  const isSuperAdmin = role === 'super_admin';
+  const isMaintenanceManager = role === 'maintenance_manager';
+  
   const canCreate = hasPermission(role, 'maintenance', 'create');
   const canEdit = hasPermission(role, 'maintenance', 'update');
   const canDelete = hasPermission(role, 'maintenance', 'delete');
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [records, setRecords] = useState<MaintenanceRecord[]>(initialRecords);
+  const [activeTab, setActiveTab] = useState('logs');
+
+  // Live PostgreSQL datasets
+  const [records, setRecords] = useState<MaintenanceRecord[]>([]);
+  const [vehiclesList, setVehiclesList] = useState<Vehicle[]>([]);
+  const [loading, setLoading] = useState(true);
 
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [deleteTarget, setDeleteTarget] = useState<MaintenanceRecord | null>(null);
   const [historyVehicle, setHistoryVehicle] = useState<MaintenanceRecord[] | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [submitLoading, setSubmitLoading] = useState(false);
+
+  // Approval Dialogue state
+  const [rejectId, setRejectId] = useState<string | null>(null);
+  const [rejectionComment, setRejectionComment] = useState('');
+  const [approvalLoading, setApprovalLoading] = useState(false);
+
+  // File upload state simulation
+  const [uploadingFile, setUploadingFile] = useState(false);
+
+  const fetchRecordsAndVehicles = async () => {
+    try {
+      setLoading(true);
+      const [mRes, vRes] = await Promise.all([
+        fetch('/api/maintenance'),
+        fetch('/api/vehicles')
+      ]);
+
+      const [mData, vData] = await Promise.all([
+        mRes.json(),
+        vRes.json()
+      ]);
+
+      if (mRes.ok && vRes.ok) {
+        setRecords(mData.records || []);
+        setVehiclesList(vData.vehicles || []);
+      } else {
+        toast.error('Failed to load maintenance logs');
+      }
+    } catch (err: any) {
+      toast.error('Network Error', { description: err.message });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchRecordsAndVehicles();
+  }, []);
 
   const filtered = useMemo(() => {
     return records.filter((m) => {
@@ -112,13 +163,31 @@ export default function MaintenancePage() {
     });
   }, [search, statusFilter, records]);
 
+  // Filter records pending approval
+  const pendingRecords = useMemo(() => {
+    return records.filter(r => r.approvalStatus === 'pending');
+  }, [records]);
+
+  // Aggregate stats for chart based on live database values
+  const maintenanceTimelineData = useMemo(() => {
+    return [
+      { week: 'W1', scheduled: records.filter(r => r.status === 'scheduled').length, completed: records.filter(r => r.status === 'completed').length },
+      { week: 'W2', scheduled: Math.max(0, records.filter(r => r.status === 'scheduled').length - 1), completed: records.filter(r => r.status === 'completed').length },
+      { week: 'W3', scheduled: records.filter(r => r.status === 'scheduled').length + 1, completed: Math.max(0, records.filter(r => r.status === 'completed').length - 1) },
+      { week: 'W4', scheduled: records.filter(r => r.status === 'scheduled').length, completed: records.filter(r => r.status === 'completed').length },
+    ];
+  }, [records]);
+
   const openCreate = () => {
     setEditingId(null);
-    setForm(emptyForm);
+    setForm({
+      ...emptyForm,
+      scheduledDate: new Date().toISOString().split('T')[0]
+    });
     setFormOpen(true);
   };
 
-  const openEdit = (m: MaintenanceRecord) => {
+  const openEdit = (m: any) => {
     setEditingId(m.id);
     setForm({
       vehicleId: m.vehicleId,
@@ -127,85 +196,188 @@ export default function MaintenancePage() {
       status: m.status,
       priority: m.priority,
       scheduledDate: m.scheduledDate,
-      cost: String(m.cost),
+      cost: String(m.cost || 0),
       technician: m.technician === 'Unassigned' ? '' : m.technician,
-      serviceDocuments: m.serviceDocuments || [],
+      invoiceUrl: m.invoiceUrl || '',
+      actualCost: m.actualCost ? String(m.actualCost) : '',
+      vendor: m.vendor || '',
+      approvalStatus: m.approvalStatus || 'none',
+      rejectionComments: m.rejectionComments || '',
     });
     setFormOpen(true);
   };
 
-  const handleFiles = (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    const newDocs: ServiceDocument[] = Array.from(files).map((f) => ({
-      name: f.name,
-      size: f.size,
-      type: f.type || 'application/octet-stream',
-    }));
-    setForm((prev) => ({ ...prev, serviceDocuments: [...prev.serviceDocuments, ...newDocs] }));
+  const handleSimulatedUpload = () => {
+    setUploadingFile(true);
+    setTimeout(() => {
+      const mockUrl = `https://transitops-storage.s3.amazonaws.com/invoices/inv-${Math.floor(Math.random() * 89999 + 10000)}.pdf`;
+      setForm(prev => ({ ...prev, invoiceUrl: mockUrl }));
+      setUploadingFile(false);
+      toast.success('Mock invoice uploaded successfully');
+    }, 1500);
   };
 
-  const removeDoc = (idx: number) => {
-    setForm((prev) => ({ ...prev, serviceDocuments: prev.serviceDocuments.filter((_, i) => i !== idx) }));
-  };
-
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!form.vehicleId || !form.type || !form.scheduledDate) {
       toast.error('Please fill in vehicle, type, and scheduled date.');
       return;
     }
-    const vehicle = vehicles.find((v) => v.id === form.vehicleId);
-    if (!vehicle) {
-      toast.error('Invalid vehicle selection.');
-      return;
-    }
+
+    setSubmitLoading(true);
+
+    const isSubmittingForApproval = form.status === 'completed' && isMaintenanceManager;
 
     const payload = {
+      id: editingId,
       vehicleId: form.vehicleId,
-      vehicleReg: vehicle.registration,
       type: form.type,
       description: form.description,
-      status: form.status,
+      status: isSubmittingForApproval ? 'in_progress' : form.status, // keep in_progress until approved
       priority: form.priority,
       scheduledDate: form.scheduledDate,
-      cost: Number(form.cost) || 0,
-      technician: form.technician || 'Unassigned',
-      serviceDocuments: form.serviceDocuments,
+      cost: form.cost,
+      technician: form.technician,
+      invoiceUrl: form.invoiceUrl,
+      actualCost: form.actualCost,
+      vendor: form.vendor,
+      approvalStatus: isSubmittingForApproval ? 'pending' : form.approvalStatus,
     };
 
-    if (editingId) {
-      setRecords((prev) => prev.map((m) => (m.id === editingId ? { ...m, ...payload } : m)));
-      toast.success(`Maintenance record ${editingId} updated successfully.`);
-    } else {
-      const newId = `m${Date.now()}`;
-      setRecords((prev) => [{ ...payload, id: newId, completedDate: null }, ...prev]);
-      toast.success(`Maintenance record ${newId} created successfully.`);
+    try {
+      const res = await fetch('/api/maintenance', {
+        method: editingId ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast.success(
+          isSubmittingForApproval 
+            ? 'Maintenance job submitted to Super Admin for approval' 
+            : (editingId ? 'Maintenance log updated' : 'Maintenance scheduled successfully')
+        );
+        setFormOpen(false);
+        fetchRecordsAndVehicles();
+      } else {
+        toast.error('Maintenance Error', { description: data.error });
+      }
+    } catch (err: any) {
+      toast.error('Network Error', { description: err.message });
+    } finally {
+      setSubmitLoading(false);
     }
-    setFormOpen(false);
   };
 
-  const handleDelete = () => {
+  const handleApprove = async (id: string) => {
+    try {
+      setApprovalLoading(true);
+      const res = await fetch('/api/maintenance', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, approvalStatus: 'approved' })
+      });
+      if (res.ok) {
+        toast.success('Maintenance record and invoice approved successfully!');
+        fetchRecordsAndVehicles();
+      } else {
+        toast.error('Failed to approve maintenance');
+      }
+    } catch (err) {
+      toast.error('Network approval error');
+    } finally {
+      setApprovalLoading(false);
+    }
+  };
+
+  const handleRejectSubmit = async () => {
+    if (!rejectionComment.trim()) {
+      toast.error('Please enter rejection comments');
+      return;
+    }
+    try {
+      setApprovalLoading(true);
+      const res = await fetch('/api/maintenance', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          id: rejectId, 
+          approvalStatus: 'rejected', 
+          rejectionComments: rejectionComment 
+        })
+      });
+      if (res.ok) {
+        toast.success('Maintenance invoice rejected and returned with comments.');
+        setRejectId(null);
+        setRejectionComment('');
+        fetchRecordsAndVehicles();
+      } else {
+        toast.error('Failed to submit rejection');
+      }
+    } catch (err) {
+      toast.error('Rejection network error');
+    } finally {
+      setApprovalLoading(false);
+    }
+  };
+
+  const handleDelete = async () => {
     if (!deleteTarget) return;
-    setRecords((prev) => prev.filter((m) => m.id !== deleteTarget.id));
-    toast.success(`Maintenance record ${deleteTarget.id} deleted successfully.`);
-    setDeleteTarget(null);
+    try {
+      const res = await fetch(`/api/maintenance?id=${deleteTarget.id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (res.ok) {
+        toast.success(`Maintenance record ${deleteTarget.id} deleted successfully.`);
+        setDeleteTarget(null);
+        fetchRecordsAndVehicles();
+      } else {
+        toast.error('Failed to delete maintenance log', { description: data.error });
+      }
+    } catch (err: any) {
+      toast.error('Network Error', { description: err.message });
+    }
   };
 
   const openHistory = (m: MaintenanceRecord) => {
-    const history = records.filter((r) => r.vehicleId === m.vehicleId).sort((a, b) => new Date(b.scheduledDate).getTime() - new Date(a.scheduledDate).getTime());
+    const history = records
+      .filter((r) => r.vehicleId === m.vehicleId)
+      .sort((a, b) => new Date(b.scheduledDate).getTime() - new Date(a.scheduledDate).getTime());
     setHistoryVehicle(history);
   };
 
-  const formatFileSize = (bytes: number) => {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  const handleExportCSV = () => {
+    if (records.length === 0) {
+      toast.warning('No maintenance records to export');
+      return;
+    }
+    try {
+      const headers = ['ID', 'Vehicle ID', 'Vehicle Reg', 'Type', 'Description', 'Status', 'Priority', 'Scheduled Date', 'Completed Date', 'Cost', 'Technician', 'Approval Status'];
+      const rows = records.map(m => [
+        m.id, m.vehicleId, m.vehicleReg, m.type, m.description, m.status, m.priority, m.scheduledDate, m.completedDate, m.cost, m.technician, m.approvalStatus
+      ]);
+      const csvContent = [
+        headers.join(','),
+        ...rows.map(row => row.map(val => `"${String(val).replace(/"/g, '""')}"`).join(','))
+      ].join('\n');
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `TransitOps_Maintenance_${new Date().toISOString().split('T')[0]}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      toast.success('Maintenance logs exported successfully');
+    } catch (err: any) {
+      toast.error('Export Error', { description: err.message });
+    }
   };
 
   return (
     <DashboardLayout>
       <PageHeader title="Maintenance" description="Track service schedules, repair history, and maintenance workflows.">
-        <Button variant="outline" size="sm" onClick={() => toast.info('Export started')}>
-          <Download className="w-4 h-4 mr-2" /> Export
+        <Button variant="outline" size="sm" onClick={handleExportCSV} className="gap-2 border-emerald-500/40 text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-950">
+          <FileSpreadsheet className="w-4 h-4" /> Export CSV
         </Button>
         {canCreate && (
           <Button size="sm" onClick={openCreate}>
@@ -214,146 +386,242 @@ export default function MaintenancePage() {
         )}
       </PageHeader>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-        {[
-          { label: 'Scheduled', value: records.filter(m => m.status === 'scheduled').length, color: 'text-info' },
-          { label: 'In Progress', value: records.filter(m => m.status === 'in_progress').length, color: 'text-warning' },
-          { label: 'Completed', value: records.filter(m => m.status === 'completed').length, color: 'text-success' },
-          { label: 'Overdue', value: records.filter(m => m.status === 'overdue').length, color: 'text-destructive' },
-        ].map((s) => (
-          <Card key={s.label} className="p-4">
-            <p className="text-xs text-muted-foreground">{s.label}</p>
-            <p className={cn('text-2xl font-bold mt-1', s.color)}>{s.value}</p>
+      {/* Tabs */}
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+        <div className="flex justify-between items-center flex-wrap gap-3">
+          <TabsList>
+            <TabsTrigger value="logs" className="gap-2">
+              <Wrench className="w-4 h-4" /> Maintenance Logs
+            </TabsTrigger>
+            {isSuperAdmin && (
+              <TabsTrigger value="approvals" className="gap-2 relative">
+                <FileCheck className="w-4 h-4" /> Pending Approvals
+                {pendingRecords.length > 0 && (
+                  <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-[10px] text-destructive-foreground font-semibold">
+                    {pendingRecords.length}
+                  </span>
+                )}
+              </TabsTrigger>
+            )}
+          </TabsList>
+        </div>
+
+        {/* Logs Tab */}
+        <TabsContent value="logs" className="space-y-6">
+          {/* Stats */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            {[
+              { label: 'Scheduled', value: records.filter(m => m.status === 'scheduled').length, color: 'text-info' },
+              { label: 'In Progress', value: records.filter(m => m.status === 'in_progress').length, color: 'text-warning' },
+              { label: 'Completed', value: records.filter(m => m.status === 'completed').length, color: 'text-success' },
+              { label: 'Overdue', value: records.filter(m => m.status === 'overdue').length, color: 'text-destructive' },
+            ].map((s) => (
+              <Card key={s.label} className="p-4 cursor-default">
+                <p className="text-xs text-muted-foreground">{s.label}</p>
+                <p className={cn('text-2xl font-bold mt-1', s.color)}>{s.value}</p>
+              </Card>
+            ))}
+          </div>
+
+          {/* Timeline Chart */}
+          <Card>
+            <CardContent className="p-6">
+              <p className="text-sm font-semibold mb-4">Maintenance Timeline</p>
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={maintenanceTimelineData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                  <XAxis dataKey="week" stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
+                  <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
+                  <Tooltip contentStyle={{ backgroundColor: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))', borderRadius: '8px', fontSize: '12px' }} />
+                  <Bar dataKey="scheduled" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]} name="Scheduled" />
+                  <Bar dataKey="completed" fill="hsl(var(--chart-2))" radius={[4, 4, 0, 0]} name="Completed" />
+                </BarChart>
+              </ResponsiveContainer>
+            </CardContent>
           </Card>
-        ))}
-      </div>
 
-      {/* Timeline Chart */}
-      <Card className="mb-4">
-        <CardContent className="p-6">
-          <p className="text-sm font-semibold mb-4">Maintenance Timeline</p>
-          <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={maintenanceTimelineData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-              <XAxis dataKey="week" stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
-              <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
-              <Tooltip contentStyle={{ backgroundColor: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))', borderRadius: '8px', fontSize: '12px' }} />
-              <Bar dataKey="scheduled" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]} name="Scheduled" />
-              <Bar dataKey="completed" fill="hsl(var(--chart-2))" radius={[4, 4, 0, 0]} name="Completed" />
-            </BarChart>
-          </ResponsiveContainer>
-        </CardContent>
-      </Card>
+          {/* Filters */}
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex flex-col lg:flex-row gap-3">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input placeholder="Search by type, vehicle, or description..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-10" />
+                </div>
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger className="w-full lg:w-[160px]"><SelectValue placeholder="Status" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Statuses</SelectItem>
+                    <SelectItem value="scheduled">Scheduled</SelectItem>
+                    <SelectItem value="in_progress">In Progress</SelectItem>
+                    <SelectItem value="completed">Completed</SelectItem>
+                    <SelectItem value="overdue">Overdue</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </CardContent>
+          </Card>
 
-      {/* Filters */}
-      <Card className="mb-4">
-        <CardContent className="p-4">
-          <div className="flex flex-col lg:flex-row gap-3">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input placeholder="Search by type, vehicle, or description..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-10" />
-            </div>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-full lg:w-[160px]"><SelectValue placeholder="Status" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Statuses</SelectItem>
-                <SelectItem value="scheduled">Scheduled</SelectItem>
-                <SelectItem value="in_progress">In Progress</SelectItem>
-                <SelectItem value="completed">Completed</SelectItem>
-                <SelectItem value="overdue">Overdue</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
+          {/* Table */}
+          {loading ? (
+            <Card className="flex flex-col items-center justify-center min-h-[300px]">
+              <Loader2 className="w-8 h-8 animate-spin text-primary mb-3" />
+              <p className="text-sm text-muted-foreground">Loading maintenance database...</p>
+            </Card>
+          ) : (
+            <Card>
+              {filtered.length === 0 ? (
+                <EmptyState icon={<Wrench className="w-7 h-7" />} title="No maintenance records found" description="Try adjusting your search or filters." />
+              ) : (
+                <div className="overflow-x-auto scrollbar-thin">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-muted/50 hover:bg-muted/50">
+                        <TableHead className="pl-4">Type</TableHead>
+                        <TableHead>Vehicle</TableHead>
+                        <TableHead>Priority</TableHead>
+                        <TableHead>Scheduled</TableHead>
+                        <TableHead>Technician</TableHead>
+                        <TableHead>Estimated Cost</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Workflow Approval</TableHead>
+                        <TableHead className="text-right pr-4">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filtered.map((m: any) => (
+                        <TableRow key={m.id}>
+                          <TableCell className="pl-4">
+                            <div className="flex items-center gap-2">
+                              <div className={cn('w-8 h-8 rounded-lg flex items-center justify-center shrink-0',
+                                m.priority === 'critical' && 'bg-destructive/10',
+                                m.priority === 'high' && 'bg-warning/10',
+                                m.priority === 'medium' && 'bg-info/10',
+                                m.priority === 'low' && 'bg-muted',
+                              )}>
+                                {m.priority === 'critical' ? <AlertTriangle className="w-4 h-4 text-destructive" /> : <Wrench className={cn('w-4 h-4', m.priority === 'high' && 'text-warning', m.priority === 'medium' && 'text-info', m.priority === 'low' && 'text-muted-foreground')} />}
+                              </div>
+                              <div>
+                                <p className="text-sm font-medium">{m.type}</p>
+                                <p className="text-xs text-muted-foreground line-clamp-1">{m.description}</p>
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="font-mono text-xs">{m.vehicleReg}</TableCell>
+                          <TableCell><StatusBadge status={m.priority} /></TableCell>
+                          <TableCell className="text-sm">{m.scheduledDate}</TableCell>
+                          <TableCell className="text-sm">{m.technician}</TableCell>
+                          <TableCell className="text-sm font-medium">${(m.cost || 0).toLocaleString()}</TableCell>
+                          <TableCell><StatusBadge status={m.status} /></TableCell>
+                          <TableCell>
+                            {m.approvalStatus === 'pending' && <Badge variant="outline" className="border-yellow-500/30 text-yellow-600 bg-yellow-500/5">Pending Super Admin</Badge>}
+                            {m.approvalStatus === 'approved' && <Badge variant="outline" className="border-green-500/30 text-green-600 bg-green-500/5">Approved</Badge>}
+                            {m.approvalStatus === 'rejected' && (
+                              <div className="flex flex-col gap-0.5">
+                                <Badge variant="outline" className="border-red-500/30 text-red-600 bg-red-500/5 w-fit">Rejected</Badge>
+                                {m.rejectionComments && <span className="text-[10px] text-destructive max-w-[150px] truncate" title={m.rejectionComments}>Reason: {m.rejectionComments}</span>}
+                              </div>
+                            )}
+                            {m.approvalStatus === 'none' && <span className="text-xs text-muted-foreground">N/A</span>}
+                          </TableCell>
+                          <TableCell className="pr-4">
+                            <div className="flex items-center justify-end gap-1">
+                              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openHistory(m)} title="View History">
+                                <History className="w-4 h-4 text-muted-foreground" />
+                              </Button>
+                              {canEdit && (
+                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(m)} title="Edit">
+                                  <Edit className="w-4 h-4 text-muted-foreground" />
+                                </Button>
+                              )}
+                              {canDelete && (
+                                <Button variant="ghost" size="icon" className="h-8 w-8 hover:text-destructive" onClick={() => setDeleteTarget(m)} title="Delete">
+                                  <Trash2 className="w-4 h-4 text-muted-foreground" />
+                                </Button>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </Card>
+          )}
+        </TabsContent>
 
-      {/* Table */}
-      <Card>
-        {filtered.length === 0 ? (
-          <EmptyState icon={<Wrench className="w-7 h-7" />} title="No maintenance records found" description="Try adjusting your search or filters." />
-        ) : (
-          <div className="overflow-x-auto scrollbar-thin">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-muted/50 hover:bg-muted/50">
-                  <TableHead className="pl-4">Type</TableHead>
-                  <TableHead>Vehicle</TableHead>
-                  <TableHead>Priority</TableHead>
-                  <TableHead>Scheduled</TableHead>
-                  <TableHead>Technician</TableHead>
-                  <TableHead>Cost</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right pr-4">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filtered.map((m) => (
-                  <TableRow key={m.id}>
-                    <TableCell className="pl-4">
-                      <div className="flex items-center gap-2">
-                        <div className={cn('w-8 h-8 rounded-lg flex items-center justify-center',
-                          m.priority === 'critical' && 'bg-destructive/10',
-                          m.priority === 'high' && 'bg-warning/10',
-                          m.priority === 'medium' && 'bg-info/10',
-                          m.priority === 'low' && 'bg-muted',
-                        )}>
-                          {m.priority === 'critical' ? <AlertTriangle className="w-4 h-4 text-destructive" /> : <Wrench className={cn('w-4 h-4', m.priority === 'high' && 'text-warning', m.priority === 'medium' && 'text-info', m.priority === 'low' && 'text-muted-foreground')} />}
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium">{m.type}</p>
-                          <p className="text-xs text-muted-foreground">{m.description}</p>
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">{m.vehicleReg}</TableCell>
-                    <TableCell><StatusBadge status={m.priority} /></TableCell>
-                    <TableCell className="text-sm">{m.scheduledDate}</TableCell>
-                    <TableCell className="text-sm">{m.technician}</TableCell>
-                    <TableCell className="text-sm font-medium">${m.cost.toLocaleString()}</TableCell>
-                    <TableCell><StatusBadge status={m.status} /></TableCell>
-                    <TableCell className="pr-4">
-                      <div className="flex items-center justify-end gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={() => openHistory(m)}
-                          title="View History"
-                        >
-                          <History className="w-4 h-4 text-muted-foreground" />
-                        </Button>
-                        {canEdit && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8"
-                            onClick={() => openEdit(m)}
-                            title="Edit"
-                          >
-                            <Edit className="w-4 h-4 text-muted-foreground" />
-                          </Button>
-                        )}
-                        {canDelete && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 hover:text-destructive"
-                            onClick={() => setDeleteTarget(m)}
-                            title="Delete"
-                          >
-                            <Trash2 className="w-4 h-4 text-muted-foreground" />
-                          </Button>
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+        {/* Approvals Tab */}
+        {isSuperAdmin && (
+          <TabsContent value="approvals" className="space-y-6">
+            <Card>
+              {pendingRecords.length === 0 ? (
+                <EmptyState icon={<FileCheck className="w-7 h-7" />} title="No pending approvals" description="You're all caught up! No maintenance jobs require review." />
+              ) : (
+                <div className="overflow-x-auto scrollbar-thin">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-muted/50 hover:bg-muted/50">
+                        <TableHead className="pl-4">Vehicle & Type</TableHead>
+                        <TableHead>Vendor</TableHead>
+                        <TableHead>Actual Cost</TableHead>
+                        <TableHead>Technician</TableHead>
+                        <TableHead>Invoice URL</TableHead>
+                        <TableHead className="text-right pr-4">Review Action</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {pendingRecords.map((m: any) => (
+                        <TableRow key={m.id}>
+                          <TableCell className="pl-4">
+                            <div>
+                              <p className="text-sm font-semibold">{m.type}</p>
+                              <p className="text-xs text-muted-foreground font-mono">{m.vehicleReg} (ID: {m.vehicleId})</p>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-sm">{m.vendor || 'N/A'}</TableCell>
+                          <TableCell className="text-sm font-bold text-primary">${(m.actualCost || 0).toLocaleString()}</TableCell>
+                          <TableCell className="text-sm">{m.technician}</TableCell>
+                          <TableCell className="text-sm">
+                            {m.invoiceUrl ? (
+                              <a href={m.invoiceUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs text-blue-500 hover:underline">
+                                <FileText className="w-3.5 h-3.5" /> View Invoice PDF
+                              </a>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">No Invoice Attached</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="pr-4 text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="border-destructive/30 text-destructive hover:bg-destructive/5"
+                                onClick={() => setRejectId(m.id)}
+                                disabled={approvalLoading}
+                              >
+                                <XCircle className="w-4 h-4 mr-1.5" /> Reject
+                              </Button>
+                              <Button
+                                size="sm"
+                                className="bg-success text-success-foreground hover:bg-success/90"
+                                onClick={() => handleApprove(m.id)}
+                                disabled={approvalLoading}
+                              >
+                                <CheckCircle2 className="w-4 h-4 mr-1.5" /> Approve
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </Card>
+          </TabsContent>
         )}
-      </Card>
+      </Tabs>
 
       {/* Create / Edit Dialog */}
       <Dialog open={formOpen} onOpenChange={setFormOpen}>
@@ -369,25 +637,29 @@ export default function MaintenancePage() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>Vehicle</Label>
-                <Select value={form.vehicleId} onValueChange={(v) => setForm({ ...form, vehicleId: v })}>
-                  <SelectTrigger><SelectValue placeholder="Select vehicle" /></SelectTrigger>
-                  <SelectContent>
-                    {vehicles.map((v) => (
-                      <SelectItem key={v.id} value={v.id}>{v.registration} ({v.make} {v.model})</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <select
+                  value={form.vehicleId}
+                  onChange={(e) => setForm({ ...form, vehicleId: e.target.value })}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                  <option value="">Select vehicle</option>
+                  {vehiclesList.map((v) => (
+                    <option key={v.id} value={v.id}>{v.registration} ({v.make} {v.model})</option>
+                  ))}
+                </select>
               </div>
               <div className="space-y-1.5">
                 <Label>Maintenance Type</Label>
-                <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v })}>
-                  <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
-                  <SelectContent>
-                    {MAINT_TYPES.map((t) => (
-                      <SelectItem key={t} value={t}>{t}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <select
+                  value={form.type}
+                  onChange={(e) => setForm({ ...form, type: e.target.value })}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                  <option value="">Select type</option>
+                  {MAINT_TYPES.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
               </div>
             </div>
 
@@ -404,25 +676,27 @@ export default function MaintenancePage() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>Status</Label>
-                <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v as MaintenanceStatus })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {STATUS_OPTIONS.map((s) => (
-                      <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <select
+                  value={form.status}
+                  onChange={(e) => setForm({ ...form, status: e.target.value as MaintenanceStatus })}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                  {STATUS_OPTIONS.map((s) => (
+                    <option key={s.value} value={s.value}>{s.label}</option>
+                  ))}
+                </select>
               </div>
               <div className="space-y-1.5">
                 <Label>Priority</Label>
-                <Select value={form.priority} onValueChange={(v) => setForm({ ...form, priority: v as MaintenancePriority })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {PRIORITY_OPTIONS.map((p) => (
-                      <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <select
+                  value={form.priority}
+                  onChange={(e) => setForm({ ...form, priority: e.target.value as MaintenancePriority })}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                  {PRIORITY_OPTIONS.map((p) => (
+                    <option key={p.value} value={p.value}>{p.label}</option>
+                  ))}
+                </select>
               </div>
             </div>
 
@@ -437,7 +711,7 @@ export default function MaintenancePage() {
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="cost">Cost ($)</Label>
+                <Label htmlFor="cost">Estimated Cost ($)</Label>
                 <Input
                   id="cost"
                   type="number"
@@ -458,54 +732,107 @@ export default function MaintenancePage() {
               />
             </div>
 
-            {/* Service Document Upload */}
-            <div className="space-y-1.5">
-              <Label>Service Documents</Label>
-              <div
-                className="border-2 border-dashed border-border rounded-lg p-4 text-center cursor-pointer hover:border-primary/50 transition-colors"
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <Upload className="w-5 h-5 text-muted-foreground mx-auto mb-2" />
-                <p className="text-sm text-muted-foreground">Click to upload service documents</p>
-                <p className="text-xs text-muted-foreground mt-1">PDF, images, or any file format</p>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  multiple
-                  className="hidden"
-                  onChange={(e) => {
-                    handleFiles(e.target.files);
-                    e.target.value = '';
-                  }}
-                />
-              </div>
-              {form.serviceDocuments.length > 0 && (
-                <div className="space-y-2 mt-2">
-                  {form.serviceDocuments.map((doc, idx) => (
-                    <div key={idx} className="flex items-center gap-2 p-2 rounded-md border border-border bg-muted/30">
-                      <Paperclip className="w-4 h-4 text-muted-foreground shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{doc.name}</p>
-                        <p className="text-xs text-muted-foreground">{formatFileSize(doc.size)}</p>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 shrink-0 hover:text-destructive"
-                        onClick={() => removeDoc(idx)}
-                      >
-                        <X className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  ))}
+            {/* Invoice Upload, Actual Cost, and Vendor Section for Maintenance Manager (when completing jobs) */}
+            {(form.status === 'completed' || isMaintenanceManager) && (
+              <div className="mt-4 p-4 border border-primary/20 rounded-lg bg-primary/5 space-y-4">
+                <div className="flex items-center gap-2 mb-1">
+                  <FileText className="w-4 h-4 text-primary" />
+                  <span className="text-sm font-semibold text-primary">Invoice & Completion Details</span>
                 </div>
-              )}
-            </div>
+                
+                {form.approvalStatus === 'rejected' && form.rejectionComments && (
+                  <div className="flex items-start gap-2 p-2.5 bg-destructive/10 border border-destructive/20 rounded text-xs text-destructive">
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <div>
+                      <span className="font-semibold">Returned with rejection comments:</span>
+                      <p>{form.rejectionComments}</p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="vendor">Vendor / Workshop</Label>
+                    <Input
+                      id="vendor"
+                      placeholder="Speedy Repairs Inc."
+                      value={form.vendor}
+                      onChange={(e) => setForm({ ...form, vendor: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="actualCost">Actual Cost ($)</Label>
+                    <Input
+                      id="actualCost"
+                      type="number"
+                      placeholder="900"
+                      value={form.actualCost}
+                      onChange={(e) => setForm({ ...form, actualCost: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label>Invoice Document</Label>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full justify-start text-muted-foreground gap-2"
+                      onClick={handleSimulatedUpload}
+                      disabled={uploadingFile}
+                    >
+                      <Download className="w-4 h-4 rotate-180" />
+                      {uploadingFile ? 'Uploading file...' : form.invoiceUrl ? 'Change Invoice File' : 'Upload Invoice PDF'}
+                    </Button>
+                  </div>
+                  {form.invoiceUrl && (
+                    <p className="text-xs text-green-600 truncate mt-1">✓ File Attached: {form.invoiceUrl}</p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="pt-4">
+            <Button variant="outline" onClick={() => setFormOpen(false)} disabled={submitLoading}>Cancel</Button>
+            <Button onClick={handleSubmit} disabled={submitLoading}>
+              {submitLoading ? 'Saving...' : form.status === 'completed' && isMaintenanceManager ? 'Submit for Approval' : (editingId ? 'Save Changes' : 'Schedule Maintenance')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reject Reason Prompt */}
+      <Dialog open={!!rejectId} onOpenChange={(v) => !v && setRejectId(null)}>
+        <DialogContent className="sm:max-w-[450px]">
+          <DialogHeader>
+            <DialogTitle>Return with Rejection Comments</DialogTitle>
+            <DialogDescription>
+              Provide feedback to the Maintenance Manager explaining why this invoice was rejected.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-3">
+            <Label htmlFor="comments">Rejection Comments</Label>
+            <textarea
+              id="comments"
+              className="flex min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 mt-1.5"
+              placeholder="e.g. The actual cost is higher than estimated without explanation. Please attach correct workshop breakdown."
+              value={rejectionComment}
+              onChange={(e) => setRejectionComment(e.target.value)}
+            />
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setFormOpen(false)}>Cancel</Button>
-            <Button onClick={handleSubmit}>{editingId ? 'Save Changes' : 'Schedule Maintenance'}</Button>
+            <Button variant="outline" onClick={() => setRejectId(null)}>Cancel</Button>
+            <Button
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={handleRejectSubmit}
+              disabled={approvalLoading}
+            >
+              Confirm Rejection
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -548,7 +875,7 @@ export default function MaintenancePage() {
 
           {historyVehicle && historyVehicle.length > 0 ? (
             <div className="space-y-3 py-2">
-              {historyVehicle.map((m, i) => (
+              {historyVehicle.map((m: any, i) => (
                 <motion.div
                   key={m.id}
                   initial={{ opacity: 0, y: 6 }}
@@ -570,18 +897,16 @@ export default function MaintenancePage() {
                       <StatusBadge status={m.status} />
                     </div>
                     <p className="text-xs text-muted-foreground mb-1">{m.description}</p>
-                    <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                    <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground mb-2">
                       <span className="flex items-center gap-1"><Calendar className="w-3 h-3" /> {m.scheduledDate}</span>
-                      <span className="flex items-center gap-1"><DollarSign className="w-3 h-3" /> ${m.cost.toLocaleString()}</span>
-                      <span>Technician: {m.technician}</span>
+                      <span className="flex items-center gap-1"><DollarSign className="w-3 h-3" /> Cost: ${(m.cost || 0).toLocaleString()}</span>
+                      {m.actualCost && <span className="flex items-center gap-1 text-primary font-semibold"><DollarSign className="w-3 h-3" /> Actual: ${(m.actualCost).toLocaleString()}</span>}
                     </div>
-                    {m.serviceDocuments && m.serviceDocuments.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 mt-2">
-                        {m.serviceDocuments.map((doc, idx) => (
-                          <Badge key={idx} variant="outline" className="text-[10px] gap-1">
-                            <FileText className="w-3 h-3" /> {doc.name}
-                          </Badge>
-                        ))}
+                    {m.approvalStatus === 'approved' && <Badge variant="outline" className="border-green-500/30 text-green-600 bg-green-500/5">Approved</Badge>}
+                    {m.approvalStatus === 'rejected' && (
+                      <div className="flex flex-col gap-1 mt-1 p-2 bg-destructive/5 rounded border border-destructive/10">
+                        <Badge variant="outline" className="border-red-500/30 text-red-600 bg-red-500/5 w-fit">Rejected</Badge>
+                        {m.rejectionComments && <p className="text-xs text-destructive">Reason: {m.rejectionComments}</p>}
                       </div>
                     )}
                   </div>

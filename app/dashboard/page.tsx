@@ -1,5 +1,6 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   Truck,
@@ -19,6 +20,7 @@ import {
   AlertTriangle,
   Info,
   XCircle,
+  Loader2,
 } from 'lucide-react';
 import {
   AreaChart,
@@ -45,21 +47,6 @@ import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useAuth } from '@/lib/auth-context';
-import { ROLES, canAccessModule } from '@/lib/rbac';
-import {
-  tripTrendData,
-  fuelTrendData,
-  expenseBreakdownData,
-  fleetUtilizationData,
-  maintenanceTimelineData,
-  driverPerformanceData,
-  vehicles,
-  drivers,
-  trips,
-  maintenanceRecords,
-  notifications,
-  auditLogs,
-} from '@/lib/mock-data';
 import { cn } from '@/lib/utils';
 
 const NOTIF_ICONS = {
@@ -73,21 +60,40 @@ export default function DashboardPage() {
   const { user } = useAuth();
   const role = user?.role || 'super_admin';
 
-  const availableVehicles = vehicles.filter((v) => v.status === 'available').length;
-  const onTripVehicles = vehicles.filter((v) => v.status === 'on_trip').length;
-  const availableDrivers = drivers.filter((d) => d.status === 'available').length;
-  const onTripDrivers = drivers.filter((d) => d.status === 'on_trip').length;
-  const maintenanceToday = maintenanceRecords.filter((m) => m.status === 'in_progress').length;
-  const monthlyFuelCost = fuelTrendData[fuelTrendData.length - 1].cost;
-  const monthlyExpenses = expenseBreakdownData.reduce((s, e) => s + e.value, 0);
-  const completedTrips = trips.filter((t) => t.status === 'completed').length;
-  const completionRate = Math.round((completedTrips / trips.length) * 100);
-  const avgHealth = Math.round(vehicles.reduce((s, v) => s + v.healthScore, 0) / vehicles.length);
+  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<any>(null);
 
-  const roleKPIs = getRoleKPIs(role, {
-    availableVehicles, onTripVehicles, availableDrivers, onTripDrivers,
-    maintenanceToday, monthlyFuelCost, monthlyExpenses, completionRate, avgHealth,
-  });
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const res = await fetch('/api/dashboard');
+        const json = await res.json();
+        if (json.success) {
+          setData(json);
+        }
+      } catch (error) {
+        console.error('Failed to load dashboard data:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchData();
+  }, []);
+
+  if (loading || !data) {
+    return (
+      <DashboardLayout>
+        <PageHeader title="Dashboard" description={`Welcome back, ${user?.name?.split(' ')[0]}. Loading your fleet data...`} />
+        <Card className="flex flex-col items-center justify-center min-h-[500px]">
+          <Loader2 className="w-8 h-8 animate-spin text-primary mb-3" />
+          <p className="text-sm text-muted-foreground">Fetching live metrics and charts...</p>
+        </Card>
+      </DashboardLayout>
+    );
+  }
+
+  const { kpis, charts, lists } = data;
+  const roleKPIs = getRoleKPIs(role, kpis);
 
   return (
     <DashboardLayout>
@@ -102,7 +108,7 @@ export default function DashboardPage() {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        {roleKPIs.map((kpi, i) => (
+        {roleKPIs.map((kpi: any, i: number) => (
           <KPICard key={kpi.label} {...kpi} delay={i * 0.05} />
         ))}
       </div>
@@ -120,7 +126,7 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={260}>
-              <AreaChart data={fleetUtilizationData}>
+              <AreaChart data={charts.fleetUtilizationData}>
                 <defs>
                   <linearGradient id="utilGrad" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="hsl(var(--chart-1))" stopOpacity={0.3} />
@@ -161,7 +167,7 @@ export default function DashboardPage() {
             <ResponsiveContainer width="100%" height={200}>
               <PieChart>
                 <Pie
-                  data={expenseBreakdownData}
+                  data={charts.expenseBreakdownData}
                   dataKey="value"
                   nameKey="name"
                   cx="50%"
@@ -170,7 +176,7 @@ export default function DashboardPage() {
                   outerRadius={80}
                   paddingAngle={2}
                 >
-                  {expenseBreakdownData.map((entry, i) => (
+                  {charts.expenseBreakdownData.map((entry: any, i: number) => (
                     <Cell key={i} fill={entry.color} />
                   ))}
                 </Pie>
@@ -185,7 +191,7 @@ export default function DashboardPage() {
               </PieChart>
             </ResponsiveContainer>
             <div className="space-y-1.5 mt-2">
-              {expenseBreakdownData.map((e) => (
+              {charts.expenseBreakdownData.map((e: any) => (
                 <div key={e.name} className="flex items-center justify-between text-xs">
                   <div className="flex items-center gap-2">
                     <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: e.color }} />
@@ -209,7 +215,7 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={tripTrendData}>
+              <BarChart data={charts.tripTrendData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
                 <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
                 <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
@@ -237,7 +243,7 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={240}>
-              <LineChart data={fuelTrendData}>
+              <LineChart data={charts.fuelTrendData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
                 <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
                 <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
@@ -274,24 +280,28 @@ export default function DashboardPage() {
           <CardContent className="pt-0">
             <ScrollArea className="h-[280px] pr-4">
               <div className="space-y-3">
-                {auditLogs.slice(0, 6).map((log) => (
-                  <div key={log.id} className="flex gap-3">
-                    <Avatar className="w-8 h-8 shrink-0">
-                      <AvatarFallback className="bg-primary/10 text-primary text-[10px] font-semibold">
-                        {log.user.split(' ').map((n) => n[0]).join('')}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm">
-                        <span className="font-medium">{log.user}</span>{' '}
-                        <span className="text-muted-foreground">{log.details}</span>
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        {log.module} · {new Date(log.timestamp).toLocaleString('en-US', { hour: 'numeric', minute: '2-digit', month: 'short', day: 'numeric' })}
-                      </p>
+                {lists.auditLogs?.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center pt-8">No recent activity found.</p>
+                ) : (
+                  lists.auditLogs.map((log: any) => (
+                    <div key={log.id} className="flex gap-3">
+                      <Avatar className="w-8 h-8 shrink-0">
+                        <AvatarFallback className="bg-primary/10 text-primary text-[10px] font-semibold">
+                          {(log.user || 'S').split(' ').map((n: string) => n[0]).join('')}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm">
+                          <span className="font-medium">{log.user || 'System'}</span>{' '}
+                          <span className="text-muted-foreground">{log.details || log.action}</span>
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {log.module} · {new Date(log.timestamp).toLocaleString('en-US', { hour: 'numeric', minute: '2-digit', month: 'short', day: 'numeric' })}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </ScrollArea>
           </CardContent>
@@ -306,37 +316,41 @@ export default function DashboardPage() {
           <CardContent className="pt-0">
             <ScrollArea className="h-[280px] pr-4">
               <div className="space-y-2.5">
-                {maintenanceRecords.filter((m) => m.status !== 'completed').map((m) => (
-                  <div key={m.id} className="flex items-center gap-3 p-2.5 rounded-lg border border-border hover:bg-accent/50 transition-colors">
-                    <div className={cn(
-                      'w-9 h-9 rounded-lg flex items-center justify-center shrink-0',
-                      m.priority === 'critical' && 'bg-destructive/10',
-                      m.priority === 'high' && 'bg-warning/10',
-                      m.priority === 'medium' && 'bg-info/10',
-                      m.priority === 'low' && 'bg-muted',
-                    )}>
-                      <Wrench className={cn(
-                        'w-4 h-4',
-                        m.priority === 'critical' && 'text-destructive',
-                        m.priority === 'high' && 'text-warning',
-                        m.priority === 'medium' && 'text-info',
-                        m.priority === 'low' && 'text-muted-foreground',
-                      )} />
+                {lists.maintenanceRecords?.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center pt-8">No scheduled maintenance.</p>
+                ) : (
+                  lists.maintenanceRecords.filter((m: any) => m.status !== 'completed').map((m: any) => (
+                    <div key={m.id} className="flex items-center gap-3 p-2.5 rounded-lg border border-border hover:bg-accent/50 transition-colors">
+                      <div className={cn(
+                        'w-9 h-9 rounded-lg flex items-center justify-center shrink-0',
+                        m.priority === 'critical' && 'bg-destructive/10',
+                        m.priority === 'high' && 'bg-warning/10',
+                        m.priority === 'medium' && 'bg-info/10',
+                        m.priority === 'low' && 'bg-muted',
+                      )}>
+                        <Wrench className={cn(
+                          'w-4 h-4',
+                          m.priority === 'critical' && 'text-destructive',
+                          m.priority === 'high' && 'text-warning',
+                          m.priority === 'medium' && 'text-info',
+                          m.priority === 'low' && 'text-muted-foreground',
+                        )} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{m.type}</p>
+                        <p className="text-xs text-muted-foreground">{m.vehicleReg} · {m.scheduledDate}</p>
+                      </div>
+                      <Badge variant="outline" className={cn(
+                        'text-[10px] shrink-0',
+                        m.status === 'overdue' && 'border-destructive/30 text-destructive',
+                        m.status === 'in_progress' && 'border-warning/30 text-warning',
+                        m.status === 'scheduled' && 'border-info/30 text-info',
+                      )}>
+                        {m.status === 'in_progress' ? 'Active' : m.status.charAt(0).toUpperCase() + m.status.slice(1)}
+                      </Badge>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{m.type}</p>
-                      <p className="text-xs text-muted-foreground">{m.vehicleReg} · {m.scheduledDate}</p>
-                    </div>
-                    <Badge variant="outline" className={cn(
-                      'text-[10px] shrink-0',
-                      m.status === 'overdue' && 'border-destructive/30 text-destructive',
-                      m.status === 'in_progress' && 'border-warning/30 text-warning',
-                      m.status === 'scheduled' && 'border-info/30 text-info',
-                    )}>
-                      {m.status === 'in_progress' ? 'Active' : m.status.charAt(0).toUpperCase() + m.status.slice(1)}
-                    </Badge>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </ScrollArea>
           </CardContent>
@@ -351,24 +365,30 @@ export default function DashboardPage() {
           <CardContent className="pt-0">
             <ScrollArea className="h-[280px] pr-4">
               <div className="space-y-2.5">
-                {trips.slice(0, 6).map((t) => (
-                  <div key={t.id} className="p-2.5 rounded-lg border border-border hover:bg-accent/50 transition-colors">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-sm font-medium">{t.origin.split(',')[0]} → {t.destination.split(',')[0]}</span>
-                      <Badge variant="outline" className={cn(
-                        'text-[10px]',
-                        t.status === 'completed' && 'border-success/30 text-success',
-                        t.status === 'in_transit' && 'border-primary/30 text-primary',
-                        t.status === 'dispatched' && 'border-primary/30 text-primary',
-                        t.status === 'planned' && 'border-info/30 text-info',
-                        t.status === 'cancelled' && 'border-destructive/30 text-destructive',
-                      )}>
-                        {t.status === 'in_transit' ? 'Active' : t.status.charAt(0).toUpperCase() + t.status.slice(1)}
-                      </Badge>
+                {lists.trips?.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center pt-8">No recent trips.</p>
+                ) : (
+                  lists.trips.map((t: any) => (
+                    <div key={t.id} className="p-2.5 rounded-lg border border-border hover:bg-accent/50 transition-colors">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-sm font-medium">
+                          {(t.origin || '').split(',')[0]} → {(t.destination || '').split(',')[0]}
+                        </span>
+                        <Badge variant="outline" className={cn(
+                          'text-[10px]',
+                          t.status === 'completed' && 'border-success/30 text-success',
+                          t.status === 'in_transit' && 'border-primary/30 text-primary',
+                          t.status === 'dispatched' && 'border-primary/30 text-primary',
+                          t.status === 'planned' && 'border-info/30 text-info',
+                          t.status === 'cancelled' && 'border-destructive/30 text-destructive',
+                        )}>
+                          {t.status === 'in_transit' ? 'Active' : (t.status || '').charAt(0).toUpperCase() + (t.status || '').slice(1)}
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground">{t.driverName || 'Unassigned'} · {t.vehicleReg || 'Unassigned'} · {t.distance} mi</p>
                     </div>
-                    <p className="text-xs text-muted-foreground">{t.driverName} · {t.vehicleReg} · {t.distance} mi</p>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </ScrollArea>
           </CardContent>
@@ -383,25 +403,29 @@ export default function DashboardPage() {
         </CardHeader>
         <CardContent className="pt-0">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {notifications.map((n) => {
-              const { icon: Icon, color, bg } = NOTIF_ICONS[n.type];
-              return (
-                <motion.div
-                  key={n.id}
-                  initial={{ opacity: 0, scale: 0.97 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  className="flex gap-3 p-3 rounded-lg border border-border hover:shadow-elevation-1 transition-shadow"
-                >
-                  <div className={cn('w-8 h-8 rounded-lg flex items-center justify-center shrink-0', bg)}>
-                    <Icon className={cn('w-4 h-4', color)} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium">{n.title}</p>
-                    <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{n.message}</p>
-                  </div>
-                </motion.div>
-              );
-            })}
+            {lists.notifications?.length === 0 ? (
+              <p className="text-sm text-muted-foreground pt-4 col-span-3 text-center">No recent notifications.</p>
+            ) : (
+              lists.notifications.map((n: any) => {
+                const { icon: Icon, color, bg } = NOTIF_ICONS[n.type as keyof typeof NOTIF_ICONS] || NOTIF_ICONS.info;
+                return (
+                  <motion.div
+                    key={n.id}
+                    initial={{ opacity: 0, scale: 0.97 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="flex gap-3 p-3 rounded-lg border border-border hover:shadow-elevation-1 transition-shadow"
+                  >
+                    <div className={cn('w-8 h-8 rounded-lg flex items-center justify-center shrink-0', bg)}>
+                      <Icon className={cn('w-4 h-4', color)} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium">{n.title}</p>
+                      <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{n.message}</p>
+                    </div>
+                  </motion.div>
+                );
+              })
+            )}
           </div>
         </CardContent>
       </Card>

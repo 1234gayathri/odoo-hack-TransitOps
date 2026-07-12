@@ -47,7 +47,6 @@ const NAV_ITEMS: { key: ModuleKey; label: string; icon: any; badge?: number }[] 
   { key: 'reports', label: 'Reports', icon: FileBarChart },
   { key: 'analytics', label: 'Analytics', icon: BarChart3 },
   { key: 'notifications', label: 'Notifications', icon: Bell, badge: 3 },
-  { key: 'audit', label: 'Audit Logs', icon: ScrollText },
   { key: 'settings', label: 'Settings', icon: Settings },
   { key: 'profile', label: 'Profile', icon: User },
 ];

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Bell,
@@ -11,18 +11,25 @@ import {
   CheckCheck,
   Trash2,
   Filter,
+  Send,
+  Loader2,
 } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/dashboard-layout';
 import { PageHeader, EmptyState } from '@/components/shared/page-components';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { notifications as initialNotifications } from '@/lib/mock-data';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from '@/components/ui/dialog';
+import { useAuth } from '@/lib/auth-context';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
-const NOTIF_CONFIG = {
+const NOTIF_CONFIG: Record<string, any> = {
   success: { icon: CheckCircle2, color: 'text-success', bg: 'bg-success/10', ring: 'ring-success/20' },
   warning: { icon: AlertTriangle, color: 'text-warning', bg: 'bg-warning/10', ring: 'ring-warning/20' },
   error: { icon: XCircle, color: 'text-destructive', bg: 'bg-destructive/10', ring: 'ring-destructive/20' },
@@ -31,9 +38,66 @@ const NOTIF_CONFIG = {
 
 type FilterTab = 'all' | 'unread' | 'read';
 
+interface AppNotification {
+  id: string;
+  fromRole: string;
+  toRole: string;
+  title: string;
+  message: string;
+  type: 'success' | 'warning' | 'error' | 'info';
+  timestamp: string;
+  read: boolean;
+}
+
+const ROLES = [
+  { value: 'all', label: 'All Roles (Broadcast)' },
+  { value: 'fleet_manager', label: 'Fleet Manager' },
+  { value: 'dispatcher', label: 'Dispatcher' },
+  { value: 'safety_officer', label: 'Safety Officer' },
+  { value: 'maintenance_manager', label: 'Maintenance Manager' },
+  { value: 'finance_analyst', label: 'Finance Analyst' },
+];
+
 export default function NotificationsPage() {
-  const [notifications, setNotifications] = useState(initialNotifications);
+  const { user } = useAuth();
+  const userRole = user?.role || 'super_admin';
+  const isSuperAdmin = userRole === 'super_admin';
+
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<FilterTab>('all');
+
+  // Compose State
+  const [composeOpen, setComposeOpen] = useState(false);
+  const [composeForm, setComposeForm] = useState({
+    title: '',
+    message: '',
+    toRole: 'all',
+    type: 'info'
+  });
+  const [composeLoading, setComposeLoading] = useState(false);
+
+  const fetchNotifications = async () => {
+    try {
+      setLoading(true);
+      const res = await fetch(`/api/notifications?role=${userRole}`);
+      const data = await res.json();
+      if (res.ok) {
+        setNotifications(data.notifications || []);
+      } else {
+        toast.error('Failed to load notifications');
+      }
+    } catch (err: any) {
+      toast.error('Network Error', { description: err.message });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchNotifications();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userRole]);
 
   const filtered = useMemo(() => {
     if (filter === 'unread') return notifications.filter((n) => !n.read);
@@ -43,32 +107,90 @@ export default function NotificationsPage() {
 
   const unreadCount = notifications.filter((n) => !n.read).length;
 
-  const handleMarkAllRead = () => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-    toast.success('All notifications marked as read');
+  const handleMarkAllRead = async () => {
+    try {
+      const res = await fetch('/api/notifications', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ markAllRead: true, role: userRole })
+      });
+      if (res.ok) {
+        setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+        toast.success('All notifications marked as read');
+      }
+    } catch (err) {
+      toast.error('Failed to mark all as read');
+    }
   };
 
-  const handleMarkRead = (id: string) => {
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, read: true } : n))
-    );
+  const handleMarkRead = async (id: string) => {
+    try {
+      const res = await fetch('/api/notifications', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, read: true })
+      });
+      if (res.ok) {
+        setNotifications((prev) =>
+          prev.map((n) => (n.id === id ? { ...n, read: true } : n))
+        );
+      }
+    } catch (err) {
+      toast.error('Failed to mark notification as read');
+    }
   };
 
-  const handleDelete = (id: string) => {
-    setNotifications((prev) => prev.filter((n) => n.id !== id));
-    toast.success('Notification dismissed');
+  const handleDelete = async (id: string) => {
+    try {
+      const res = await fetch(`/api/notifications?id=${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        setNotifications((prev) => prev.filter((n) => n.id !== id));
+        toast.success('Notification dismissed');
+      }
+    } catch (err) {
+      toast.error('Failed to dismiss notification');
+    }
+  };
+
+  const handleBroadcast = async () => {
+    if (!composeForm.title.trim() || !composeForm.message.trim()) {
+      toast.error('Please enter a title and message');
+      return;
+    }
+
+    try {
+      setComposeLoading(true);
+      const res = await fetch('/api/notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(composeForm)
+      });
+      if (res.ok) {
+        toast.success('Notification broadcasted successfully');
+        setComposeOpen(false);
+        setComposeForm({ title: '', message: '', toRole: 'all', type: 'info' });
+        fetchNotifications();
+      } else {
+        const data = await res.json();
+        toast.error('Broadcast Error', { description: data.error });
+      }
+    } catch (err: any) {
+      toast.error('Network Error', { description: err.message });
+    } finally {
+      setComposeLoading(false);
+    }
   };
 
   const formatTimestamp = (iso: string) => {
     const date = new Date(iso);
-    const now = new Date('2026-07-12T10:00:00Z');
+    const now = new Date();
     const diffMs = now.getTime() - date.getTime();
     const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
     const diffMins = Math.floor(diffMs / (1000 * 60));
 
-    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffMins < 60) return `${Math.max(0, diffMins)}m ago`;
     if (diffHrs < 24) return `${diffHrs}h ago`;
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
   };
 
   return (
@@ -77,14 +199,21 @@ export default function NotificationsPage() {
         title="Notifications"
         description="Stay updated with real-time system alerts and activity notifications."
       >
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleMarkAllRead}
-          disabled={unreadCount === 0}
-        >
-          <CheckCheck className="w-4 h-4 mr-2" /> Mark all as read
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleMarkAllRead}
+            disabled={unreadCount === 0 || loading}
+          >
+            <CheckCheck className="w-4 h-4 mr-2" /> Mark all as read
+          </Button>
+          {isSuperAdmin && (
+            <Button size="sm" onClick={() => setComposeOpen(true)}>
+              <Send className="w-4 h-4 mr-2" /> Broadcast Notification
+            </Button>
+          )}
+        </div>
       </PageHeader>
 
       {/* Filter Tabs */}
@@ -111,7 +240,12 @@ export default function NotificationsPage() {
       {/* Notifications List */}
       <Card>
         <CardContent className="p-0">
-          {filtered.length === 0 ? (
+          {loading ? (
+            <div className="flex flex-col items-center justify-center min-h-[300px]">
+              <Loader2 className="w-8 h-8 animate-spin text-primary mb-3" />
+              <p className="text-sm text-muted-foreground">Loading notifications database...</p>
+            </div>
+          ) : filtered.length === 0 ? (
             <EmptyState
               icon={<Bell className="w-7 h-7" />}
               title="No notifications"
@@ -125,7 +259,7 @@ export default function NotificationsPage() {
             <div className="divide-y divide-border">
               <AnimatePresence>
                 {filtered.map((n, i) => {
-                  const config = NOTIF_CONFIG[n.type];
+                  const config = NOTIF_CONFIG[n.type] || NOTIF_CONFIG.info;
                   const Icon = config.icon;
                   return (
                     <motion.div
@@ -161,6 +295,9 @@ export default function NotificationsPage() {
                               <p className={cn('text-sm', n.read ? 'font-medium' : 'font-semibold')}>
                                 {n.title}
                               </p>
+                              {n.toRole === 'all' && (
+                                <Badge variant="outline" className="text-[10px] ml-2">Broadcast</Badge>
+                              )}
                             </div>
                             <p className="text-sm text-muted-foreground mt-0.5">{n.message}</p>
                             <p className="text-xs text-muted-foreground mt-1.5">
@@ -201,13 +338,79 @@ export default function NotificationsPage() {
       </Card>
 
       {/* Summary */}
-      {filtered.length > 0 && (
+      {filtered.length > 0 && !loading && (
         <div className="flex items-center justify-center gap-2 mt-4 text-xs text-muted-foreground">
           <Filter className="w-3.5 h-3.5" />
           Showing {filtered.length} notification{filtered.length !== 1 ? 's' : ''}
           {unreadCount > 0 && ` · ${unreadCount} unread`}
         </div>
       )}
+
+      {/* Broadcast Dialog */}
+      <Dialog open={composeOpen} onOpenChange={setComposeOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Broadcast Notification</DialogTitle>
+            <DialogDescription>
+              Send an alert to specific roles or everyone in the system.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-4 py-2">
+            <div className="space-y-1.5">
+              <Label>Target Audience</Label>
+              <select
+                value={composeForm.toRole}
+                onChange={(e) => setComposeForm({ ...composeForm, toRole: e.target.value })}
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              >
+                {ROLES.map((r) => (
+                  <option key={r.value} value={r.value}>{r.label}</option>
+                ))}
+              </select>
+            </div>
+            
+            <div className="space-y-1.5">
+              <Label>Notification Type</Label>
+              <select
+                value={composeForm.type}
+                onChange={(e) => setComposeForm({ ...composeForm, type: e.target.value })}
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              >
+                <option value="info">Information (Blue)</option>
+                <option value="success">Success (Green)</option>
+                <option value="warning">Warning (Yellow)</option>
+                <option value="error">Critical Alert (Red)</option>
+              </select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Title</Label>
+              <Input
+                placeholder="e.g. System Maintenance Scheduled"
+                value={composeForm.title}
+                onChange={(e) => setComposeForm({ ...composeForm, title: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Message</Label>
+              <textarea
+                className="flex min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                placeholder="Enter the notification content here..."
+                value={composeForm.message}
+                onChange={(e) => setComposeForm({ ...composeForm, message: e.target.value })}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setComposeOpen(false)} disabled={composeLoading}>Cancel</Button>
+            <Button onClick={handleBroadcast} disabled={composeLoading}>
+              {composeLoading ? 'Sending...' : 'Send Broadcast'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   Route,
@@ -19,6 +19,9 @@ import {
   List,
   GitBranch,
   ArrowRight,
+  Loader2,
+  FileSpreadsheet,
+  Wrench,
 } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/dashboard-layout';
 import { PageHeader, StatusBadge, EmptyState } from '@/components/shared/page-components';
@@ -73,8 +76,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { trips as initialTrips, drivers, vehicles } from '@/lib/mock-data';
-import type { Trip, TripStatus } from '@/lib/types';
+import type { Trip, TripStatus, Driver, Vehicle } from '@/lib/types';
 import { useAuth } from '@/lib/auth-context';
 import { hasPermission } from '@/lib/rbac';
 import { cn } from '@/lib/utils';
@@ -125,7 +127,7 @@ const emptyForm: FormState = {
   status: 'planned',
   departureTime: '',
   estimatedArrival: '',
-  distance: '',
+  distance: '240',
   cargoType: '',
   priority: 'normal',
 };
@@ -155,12 +157,78 @@ export default function TripsPage() {
   const [view, setView] = useState<ViewMode>('kanban');
   const [search, setSearch] = useState('');
   const [drawerTrip, setDrawerTrip] = useState<Trip | null>(null);
-  const [tripList, setTripList] = useState<Trip[]>(initialTrips);
+
+  const handleRequestMaintenance = async (trip: Trip) => {
+    try {
+      const res = await fetch('/api/maintenance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vehicleId: trip.vehicleId,
+          type: 'Scheduled Inspection',
+          description: `Post-trip maintenance request from completed trip #${trip.id}.`,
+          status: 'scheduled',
+          priority: 'medium',
+          scheduledDate: new Date().toISOString().split('T')[0],
+          cost: '0',
+          technician: 'Unassigned',
+        })
+      });
+      if (res.ok) {
+        toast.success('Maintenance requested successfully for vehicle ' + trip.vehicleReg);
+        setDrawerTrip(null);
+      } else {
+        toast.error('Failed to request maintenance');
+      }
+    } catch (err) {
+      toast.error('Network error during maintenance request');
+    }
+  };
+
+  // Live database datasets
+  const [tripList, setTripList] = useState<Trip[]>([]);
+  const [driversList, setDriversList] = useState<Driver[]>([]);
+  const [vehiclesList, setVehiclesList] = useState<Vehicle[]>([]);
+  const [loading, setLoading] = useState(true);
 
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [deleteTarget, setDeleteTarget] = useState<Trip | null>(null);
+  const [submitLoading, setSubmitLoading] = useState(false);
+
+  const fetchTripsAndDropdowns = async () => {
+    try {
+      setLoading(true);
+      const [tRes, dRes, vRes] = await Promise.all([
+        fetch('/api/trips'),
+        fetch('/api/drivers'),
+        fetch('/api/vehicles')
+      ]);
+
+      const [tData, dData, vData] = await Promise.all([
+        tRes.json(),
+        dRes.json(),
+        vRes.json()
+      ]);
+
+      if (tRes.ok && dRes.ok && vRes.ok) {
+        setTripList(tData.trips || []);
+        setDriversList(dData.drivers || []);
+        setVehiclesList(vData.vehicles || []);
+      } else {
+        toast.error('Failed to load trips database');
+      }
+    } catch (err: any) {
+      toast.error('Network Error', { description: err.message });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchTripsAndDropdowns();
+  }, []);
 
   const filtered = useMemo(() => {
     return tripList.filter((t) => {
@@ -175,7 +243,11 @@ export default function TripsPage() {
 
   const openCreate = () => {
     setEditingId(null);
-    setForm(emptyForm);
+    setForm({
+      ...emptyForm,
+      departureTime: toLocalInput(new Date().toISOString()),
+      estimatedArrival: toLocalInput(new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString()), // 5 hours later
+    });
     setFormOpen(true);
   };
 
@@ -197,83 +269,102 @@ export default function TripsPage() {
     setFormOpen(true);
   };
 
-  const handleSubmit = () => {
-    if (!form.origin || !form.destination || !form.driverId || !form.vehicleId) {
-      toast.error('Please fill in origin, destination, driver, and vehicle.');
-      return;
-    }
-    const driver = drivers.find((d) => d.id === form.driverId);
-    const vehicle = vehicles.find((v) => v.id === form.vehicleId);
-    if (!driver || !vehicle) {
-      toast.error('Invalid driver or vehicle selection.');
+  const handleSubmit = async () => {
+    if (!form.origin.trim() || !form.destination.trim() || !form.driverId || !form.vehicleId || !form.departureTime || !form.estimatedArrival) {
+      toast.error('Please fill in all required fields.');
       return;
     }
 
-    if (editingId) {
-      setTripList((prev) =>
-        prev.map((t) =>
-          t.id === editingId
-            ? {
-                ...t,
-                origin: form.origin,
-                destination: form.destination,
-                driverId: form.driverId,
-                driverName: driver.name,
-                vehicleId: form.vehicleId,
-                vehicleReg: vehicle.registration,
-                status: form.status,
-                departureTime: toIso(form.departureTime),
-                estimatedArrival: toIso(form.estimatedArrival),
-                distance: Number(form.distance) || 0,
-                cargoType: form.cargoType,
-                priority: form.priority,
-              }
-            : t,
-        ),
-      );
-      toast.success(`Trip ${editingId} updated successfully.`);
-    } else {
-      const newId = `t${Date.now()}`;
-      const newTrip: Trip = {
-        id: newId,
-        origin: form.origin,
-        destination: form.destination,
-        driverId: form.driverId,
-        driverName: driver.name,
-        vehicleId: form.vehicleId,
-        vehicleReg: vehicle.registration,
-        status: form.status,
-        departureTime: toIso(form.departureTime),
-        estimatedArrival: toIso(form.estimatedArrival),
-        distance: Number(form.distance) || 0,
-        cargoType: form.cargoType,
-        priority: form.priority,
-      };
-      setTripList((prev) => [newTrip, ...prev]);
-      toast.success(`Trip ${newId} created successfully.`);
+    setSubmitLoading(true);
+    const method = editingId ? 'PUT' : 'POST';
+    const payload = {
+      id: editingId,
+      origin: form.origin,
+      destination: form.destination,
+      driverId: form.driverId,
+      vehicleId: form.vehicleId,
+      status: form.status,
+      departureTime: toIso(form.departureTime),
+      estimatedArrival: toIso(form.estimatedArrival),
+      distance: form.distance,
+      cargoType: form.cargoType,
+      priority: form.priority
+    };
+
+    try {
+      const res = await fetch('/api/trips', {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast.success(editingId ? 'Trip details updated' : 'New trip successfully planned');
+        setFormOpen(false);
+        fetchTripsAndDropdowns();
+      } else {
+        toast.error('Trip Error', { description: data.error });
+      }
+    } catch (err: any) {
+      toast.error('Network Error', { description: err.message });
+    } finally {
+      setSubmitLoading(false);
     }
-    setFormOpen(false);
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!deleteTarget) return;
-    setTripList((prev) => prev.filter((t) => t.id !== deleteTarget.id));
-    if (drawerTrip?.id === deleteTarget.id) setDrawerTrip(null);
-    toast.success(`Trip ${deleteTarget.id} deleted successfully.`);
-    setDeleteTarget(null);
+    try {
+      const res = await fetch(`/api/trips?id=${deleteTarget.id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (res.ok) {
+        toast.success(`Trip ${deleteTarget.id} deleted successfully.`);
+        setDeleteTarget(null);
+        if (drawerTrip?.id === deleteTarget.id) setDrawerTrip(null);
+        fetchTripsAndDropdowns();
+      } else {
+        toast.error('Failed to delete trip', { description: data.error });
+      }
+    } catch (err: any) {
+      toast.error('Network Error', { description: err.message });
+    }
+  };
+
+  const handleExportCSV = () => {
+    if (tripList.length === 0) {
+      toast.warning('No trips to export');
+      return;
+    }
+    try {
+      const headers = ['ID', 'Origin', 'Destination', 'Driver ID', 'Driver Name', 'Vehicle ID', 'Vehicle Reg', 'Status', 'Departure Time', 'Est Arrival', 'Distance', 'Cargo Type', 'Priority'];
+      const rows = tripList.map(t => [
+        t.id, t.origin, t.destination, t.driverId, t.driverName, t.vehicleId, t.vehicleReg, t.status, t.departureTime, t.estimatedArrival, t.distance, t.cargoType, t.priority
+      ]);
+      const csvContent = [
+        headers.join(','),
+        ...rows.map(row => row.map(val => `"${String(val).replace(/"/g, '""')}"`).join(','))
+      ].join('\n');
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `TransitOps_Trips_${new Date().toISOString().split('T')[0]}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      toast.success('Trips log exported successfully');
+    } catch (err: any) {
+      toast.error('Export Error', { description: err.message });
+    }
   };
 
   return (
     <DashboardLayout>
       <PageHeader title="Trips" description="Plan, dispatch, and track all transport operations across your fleet.">
-        <Button variant="outline" size="sm" onClick={() => toast.info('Export started')}>
-          <Download className="w-4 h-4 mr-2" /> Export
+        <Button variant="outline" size="sm" onClick={handleExportCSV} className="gap-2 border-emerald-500/40 text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-950">
+          <FileSpreadsheet className="w-4 h-4" /> Export CSV
         </Button>
-        {canCreate && (
-          <Button size="sm" onClick={openCreate}>
-            <Plus className="w-4 h-4 mr-2" /> Create Trip
-          </Button>
-        )}
       </PageHeader>
 
       {/* Stats */}
@@ -281,7 +372,7 @@ export default function TripsPage() {
         {COLUMNS.map((col) => {
           const count = tripList.filter((t) => t.status === col.key).length;
           return (
-            <Card key={col.key} className="p-4">
+            <Card key={col.key} className="p-4 cursor-default">
               <div className="flex items-center gap-2 mb-1">
                 <span className="w-2 h-2 rounded-full" style={{ backgroundColor: col.color }} />
                 <p className="text-xs text-muted-foreground">{col.label}</p>
@@ -320,7 +411,12 @@ export default function TripsPage() {
         </CardContent>
       </Card>
 
-      {filtered.length === 0 ? (
+      {loading ? (
+        <Card className="flex flex-col items-center justify-center min-h-[300px]">
+          <Loader2 className="w-8 h-8 animate-spin text-primary mb-3" />
+          <p className="text-sm text-muted-foreground">Loading transport database...</p>
+        </Card>
+      ) : filtered.length === 0 ? (
         <Card>
           <EmptyState
             icon={<Route className="w-7 h-7" />}
@@ -369,13 +465,13 @@ export default function TripsPage() {
                       </div>
                       <div className="space-y-1">
                         <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                          <User className="w-3 h-3" /> {t.driverName}
+                          <User className="w-3 h-3 shrink-0" /> {t.driverName}
                         </div>
                         <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                          <Truck className="w-3 h-3" /> {t.vehicleReg}
+                          <Truck className="w-3 h-3 shrink-0" /> {t.vehicleReg}
                         </div>
                         <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                          <Clock className="w-3 h-3" /> {new Date(t.departureTime).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                          <Clock className="w-3 h-3 shrink-0" /> {new Date(t.departureTime).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
                         </div>
                       </div>
                     </motion.div>
@@ -537,34 +633,41 @@ export default function TripsPage() {
                     { icon: MapPin, label: 'Distance', value: `${drawerTrip.distance} miles` },
                     { icon: Route, label: 'Cargo Type', value: drawerTrip.cargoType },
                   ].map((d) => (
-                    <div key={d.label} className="flex items-center gap-3 py-2 border-b border-border last:border-0">
+                    <div key={d.label} className="flex items-center gap-3 py-2 border-b border-border last:border-0 text-sm">
                       <d.icon className="w-4 h-4 text-muted-foreground shrink-0" />
                       <div>
                         <p className="text-xs text-muted-foreground">{d.label}</p>
-                        <p className="text-sm font-medium">{d.value}</p>
+                        <p className="font-medium">{d.value}</p>
                       </div>
                     </div>
                   ))}
                 </div>
 
-                <div className="flex gap-2 pt-2">
-                  {canEdit && (
-                    <Button className="flex-1" onClick={() => openEdit(drawerTrip)}>
-                      <Edit className="w-4 h-4 mr-2" /> Edit Trip
-                    </Button>
-                  )}
-                  {canDelete && (
-                    <Button
-                      variant="destructive"
-                      className="flex-1"
-                      onClick={() => setDeleteTarget(drawerTrip)}
+                <div className="flex flex-col gap-2 pt-2">
+                  {drawerTrip.status === 'completed' && (role === 'dispatcher' || role === 'super_admin') && (
+                    <Button 
+                      className="w-full bg-warning hover:bg-warning/90 text-warning-foreground" 
+                      onClick={() => handleRequestMaintenance(drawerTrip)}
                     >
-                      <Trash2 className="w-4 h-4 mr-2" /> Delete
+                      <Wrench className="w-4 h-4 mr-2" /> Request Maintenance
                     </Button>
                   )}
-                  <Button variant="outline" onClick={() => toast.info('Opening map preview')}>
-                    <MapPin className="w-4 h-4 mr-2" /> Map
-                  </Button>
+                  <div className="flex gap-2 w-full">
+                    {canEdit && (
+                      <Button className="flex-1" onClick={() => openEdit(drawerTrip)}>
+                        <Edit className="w-4 h-4 mr-2" /> Edit Trip
+                      </Button>
+                    )}
+                    {canDelete && (
+                      <Button
+                        variant="destructive"
+                        className="flex-1"
+                        onClick={() => setDeleteTarget(drawerTrip)}
+                      >
+                        <Trash2 className="w-4 h-4 mr-2" /> Delete
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </div>
             </>
@@ -607,58 +710,56 @@ export default function TripsPage() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>Driver</Label>
-                <Select value={form.driverId} onValueChange={(v) => setForm({ ...form, driverId: v })}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select driver" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {drivers.map((d) => (
-                      <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <select
+                  value={form.driverId}
+                  onChange={(e) => setForm({ ...form, driverId: e.target.value })}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                  <option value="">Select driver</option>
+                  {driversList.map((d) => (
+                    <option key={d.id} value={d.id}>{d.name} ({d.status})</option>
+                  ))}
+                </select>
               </div>
               <div className="space-y-1.5">
                 <Label>Vehicle</Label>
-                <Select value={form.vehicleId} onValueChange={(v) => setForm({ ...form, vehicleId: v })}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select vehicle" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {vehicles.map((v) => (
-                      <SelectItem key={v.id} value={v.id}>{v.registration} ({v.make} {v.model})</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <select
+                  value={form.vehicleId}
+                  onChange={(e) => setForm({ ...form, vehicleId: e.target.value })}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                  <option value="">Select vehicle</option>
+                  {vehiclesList.map((v) => (
+                    <option key={v.id} value={v.id}>{v.registration} - {v.make} ({v.status})</option>
+                  ))}
+                </select>
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>Status</Label>
-                <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v as TripStatus })}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {STATUS_OPTIONS.map((s) => (
-                      <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <select
+                  value={form.status}
+                  onChange={(e) => setForm({ ...form, status: e.target.value as TripStatus })}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                  {STATUS_OPTIONS.map((s) => (
+                    <option key={s.value} value={s.value}>{s.label}</option>
+                  ))}
+                </select>
               </div>
               <div className="space-y-1.5">
                 <Label>Priority</Label>
-                <Select value={form.priority} onValueChange={(v) => setForm({ ...form, priority: v as 'low' | 'normal' | 'high' })}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PRIORITY_OPTIONS.map((p) => (
-                      <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <select
+                  value={form.priority}
+                  onChange={(e) => setForm({ ...form, priority: e.target.value as 'low' | 'normal' | 'high' })}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                  {PRIORITY_OPTIONS.map((p) => (
+                    <option key={p.value} value={p.value}>{p.label}</option>
+                  ))}
+                </select>
               </div>
             </div>
 
@@ -706,9 +807,11 @@ export default function TripsPage() {
             </div>
           </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setFormOpen(false)}>Cancel</Button>
-            <Button onClick={handleSubmit}>{editingId ? 'Save Changes' : 'Create Trip'}</Button>
+          <DialogFooter className="pt-4">
+            <Button variant="outline" onClick={() => setFormOpen(false)} disabled={submitLoading}>Cancel</Button>
+            <Button onClick={handleSubmit} disabled={submitLoading}>
+              {submitLoading ? 'Saving...' : editingId ? 'Save Changes' : 'Create Trip'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
