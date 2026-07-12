@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
-  Wrench, Plus, Download, Search, Calendar, DollarSign, History, Edit, Trash2, Loader2, FileSpreadsheet,
-  CheckCircle2, XCircle, FileText, ArrowRight, AlertCircle, FileCheck, AlertTriangle
+  Wrench, Plus, Upload, Search, Calendar, DollarSign, History, Edit, Trash2, Loader2, FileSpreadsheet,
+  CheckCircle2, XCircle, FileText, AlertCircle, FileCheck, AlertTriangle, Paperclip
 } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/dashboard-layout';
 import { PageHeader, StatusBadge, EmptyState } from '@/components/shared/page-components';
@@ -32,7 +32,7 @@ import {
 } from 'recharts';
 import type { MaintenanceRecord, MaintenanceStatus, MaintenancePriority, Vehicle } from '@/lib/types';
 import { useAuth } from '@/lib/auth-context';
-import { hasPermission } from '@/lib/rbac';
+
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
@@ -89,14 +89,14 @@ const emptyForm: FormState = {
 };
 
 export default function MaintenancePage() {
-  const { user } = useAuth();
+  const { user, hasPermission, canAccessModule } = useAuth();
   const role = user?.role || 'super_admin';
   const isSuperAdmin = role === 'super_admin';
   const isMaintenanceManager = role === 'maintenance_manager';
   
-  const canCreate = hasPermission(role, 'maintenance', 'create');
-  const canEdit = hasPermission(role, 'maintenance', 'update');
-  const canDelete = hasPermission(role, 'maintenance', 'delete');
+  const canCreate = hasPermission('maintenance', 'create');
+  const canEdit = hasPermission('maintenance', 'update');
+  const canDelete = hasPermission('maintenance', 'delete');
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -119,8 +119,10 @@ export default function MaintenancePage() {
   const [rejectionComment, setRejectionComment] = useState('');
   const [approvalLoading, setApprovalLoading] = useState(false);
 
-  // File upload state simulation
+  // File upload state
   const [uploadingFile, setUploadingFile] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadedFileName, setUploadedFileName] = useState('');
 
   const fetchRecordsAndVehicles = async () => {
     try {
@@ -207,14 +209,45 @@ export default function MaintenancePage() {
     setFormOpen(true);
   };
 
-  const handleSimulatedUpload = () => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const allowedTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg'];
+    if (!allowedTypes.includes(file.type)) {
+      toast.error('Invalid file type. Only PDF, JPG, and PNG are allowed.');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('File too large. Maximum size is 5MB.');
+      return;
+    }
+
     setUploadingFile(true);
-    setTimeout(() => {
-      const mockUrl = `https://transitops-storage.s3.amazonaws.com/invoices/inv-${Math.floor(Math.random() * 89999 + 10000)}.pdf`;
-      setForm(prev => ({ ...prev, invoiceUrl: mockUrl }));
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const res = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+
+      if (res.ok && data.url) {
+        setForm(prev => ({ ...prev, invoiceUrl: data.url }));
+        setUploadedFileName(file.name);
+        toast.success(`Invoice "${file.name}" uploaded successfully!`);
+      } else {
+        toast.error('Upload failed', { description: data.error });
+      }
+    } catch (err: any) {
+      toast.error('Upload error', { description: err.message });
+    } finally {
       setUploadingFile(false);
-      toast.success('Mock invoice uploaded successfully');
-    }, 1500);
+      // Reset input so same file can be re-uploaded
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
 
   const handleSubmit = async () => {
@@ -251,12 +284,15 @@ export default function MaintenancePage() {
       });
       const data = await res.json();
       if (res.ok) {
-        toast.success(
-          isSubmittingForApproval 
-            ? 'Maintenance job submitted to Super Admin for approval' 
-            : (editingId ? 'Maintenance log updated' : 'Maintenance scheduled successfully')
-        );
+        if (isSubmittingForApproval) {
+          toast.success('Invoice submitted to Super Admin for approval!', {
+            description: 'Super Admin will receive a notification with Approve/Reject options.'
+          });
+        } else {
+          toast.success(editingId ? 'Maintenance log updated' : 'Maintenance scheduled successfully');
+        }
         setFormOpen(false);
+        setUploadedFileName('');
         fetchRecordsAndVehicles();
       } else {
         toast.error('Maintenance Error', { description: data.error });
@@ -277,7 +313,9 @@ export default function MaintenancePage() {
         body: JSON.stringify({ id, approvalStatus: 'approved' })
       });
       if (res.ok) {
-        toast.success('Maintenance record and invoice approved successfully!');
+        toast.success('✅ Maintenance approved!', {
+          description: 'Expense recorded. Maintenance Manager has been notified.'
+        });
         fetchRecordsAndVehicles();
       } else {
         toast.error('Failed to approve maintenance');
@@ -306,7 +344,9 @@ export default function MaintenancePage() {
         })
       });
       if (res.ok) {
-        toast.success('Maintenance invoice rejected and returned with comments.');
+        toast.success('❌ Maintenance rejected with comments.', {
+          description: 'Maintenance Manager has been notified with your feedback.'
+        });
         setRejectId(null);
         setRejectionComment('');
         fetchRecordsAndVehicles();
@@ -774,20 +814,36 @@ export default function MaintenancePage() {
 
                 <div className="space-y-1.5">
                   <Label>Invoice Document</Label>
+                  {/* Hidden real file input */}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.png"
+                    className="hidden"
+                    onChange={handleFileUpload}
+                  />
                   <div className="flex gap-2">
                     <Button
                       type="button"
                       variant="outline"
-                      className="w-full justify-start text-muted-foreground gap-2"
-                      onClick={handleSimulatedUpload}
+                      className="w-full justify-start text-muted-foreground gap-2 border-dashed hover:border-primary/50 hover:text-primary"
+                      onClick={() => fileInputRef.current?.click()}
                       disabled={uploadingFile}
                     >
-                      <Download className="w-4 h-4 rotate-180" />
-                      {uploadingFile ? 'Uploading file...' : form.invoiceUrl ? 'Change Invoice File' : 'Upload Invoice PDF'}
+                      {uploadingFile ? (
+                        <><Loader2 className="w-4 h-4 animate-spin" /> Uploading...</>
+                      ) : (
+                        <><Upload className="w-4 h-4" /> {form.invoiceUrl ? 'Change Invoice File' : 'Upload Invoice (PDF/JPG/PNG)'}</>
+                      )}
                     </Button>
                   </div>
                   {form.invoiceUrl && (
-                    <p className="text-xs text-green-600 truncate mt-1">✓ File Attached: {form.invoiceUrl}</p>
+                    <div className="flex items-center gap-2 mt-1.5 p-2 rounded bg-green-500/10 border border-green-500/20">
+                      <Paperclip className="w-3.5 h-3.5 text-green-600 shrink-0" />
+                      <p className="text-xs text-green-600 truncate font-medium">
+                        {uploadedFileName || 'Invoice attached'}
+                      </p>
+                    </div>
                   )}
                 </div>
               </div>

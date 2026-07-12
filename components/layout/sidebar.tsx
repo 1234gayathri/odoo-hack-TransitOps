@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
-import { canAccessModule, ROLES } from '@/lib/rbac';
+import { ROLES } from '@/lib/rbac';
 import type { ModuleKey, Role } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -41,12 +41,12 @@ const NAV_ITEMS: { key: ModuleKey; label: string; icon: any; badge?: number }[] 
   { key: 'drivers', label: 'Drivers', icon: UserCog },
   { key: 'trips', label: 'Trips', icon: Route },
   { key: 'dispatch', label: 'Dispatch', icon: MapPin },
-  { key: 'maintenance', label: 'Maintenance', icon: Wrench, badge: 2 },
+  { key: 'maintenance', label: 'Maintenance', icon: Wrench },
   { key: 'fuel', label: 'Fuel Logs', icon: Fuel },
-  { key: 'expenses', label: 'Expenses', icon: Receipt, badge: 3 },
+  { key: 'expenses', label: 'Expenses', icon: Receipt },
   { key: 'reports', label: 'Reports', icon: FileBarChart },
   { key: 'analytics', label: 'Analytics', icon: BarChart3 },
-  { key: 'notifications', label: 'Notifications', icon: Bell, badge: 3 },
+  { key: 'notifications', label: 'Notifications', icon: Bell },
   { key: 'settings', label: 'Settings', icon: Settings },
   { key: 'profile', label: 'Profile', icon: User },
 ];
@@ -69,13 +69,13 @@ interface SidebarProps {
 
 export function Sidebar({ collapsed, setCollapsed, mobileOpen, setMobileOpen }: SidebarProps) {
   const pathname = usePathname();
-  const { user, logout, switchRole } = useAuth();
+  const { user, hasPermission, canAccessModule, logout, switchRole } = useAuth();
   const role = user?.role || 'super_admin';
   const unreadCount = notifications.filter((n) => !n.read).length;
 
   const visibleItems = NAV_ITEMS.filter((item) => {
     if (item.key === 'profile') return true;
-    return canAccessModule(role, item.key);
+    return canAccessModule(item.key);
   });
 
   const navItems = visibleItems.filter((i) => i.key !== 'profile');

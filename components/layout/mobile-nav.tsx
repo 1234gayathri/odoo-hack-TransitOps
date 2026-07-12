@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import { LayoutDashboard, Truck, Route, Bell, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
-import { canAccessModule } from '@/lib/rbac';
+
 import type { ModuleKey } from '@/lib/types';
 
 const MOBILE_ITEMS: { key: ModuleKey; label: string; icon: any }[] = [
@@ -18,10 +18,10 @@ const MOBILE_ITEMS: { key: ModuleKey; label: string; icon: any }[] = [
 
 export function MobileNav() {
   const pathname = usePathname();
-  const { user } = useAuth();
+  const { user, hasPermission, canAccessModule } = useAuth();
   const role = user?.role || 'super_admin';
 
-  const items = MOBILE_ITEMS.filter((i) => i.key === 'profile' || canAccessModule(role, i.key));
+  const items = MOBILE_ITEMS.filter((i) => i.key === 'profile' || canAccessModule(i.key));
 
   return (
     <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-30 glass border-t border-border">

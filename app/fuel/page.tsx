@@ -13,13 +13,13 @@ import {
 } from 'recharts';
 import { fuelLogs, fuelTrendData } from '@/lib/mock-data';
 import { useAuth } from '@/lib/auth-context';
-import { hasPermission } from '@/lib/rbac';
+
 import { toast } from 'sonner';
 
 export default function FuelPage() {
-  const { user } = useAuth();
+  const { user, hasPermission, canAccessModule } = useAuth();
   const role = user?.role || 'super_admin';
-  const canCreate = hasPermission(role, 'fuel', 'create');
+  const canCreate = hasPermission('fuel', 'create');
 
   const [search, setSearch] = useState('');
 

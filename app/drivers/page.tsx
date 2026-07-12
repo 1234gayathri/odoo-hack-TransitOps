@@ -69,16 +69,16 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useAuth } from '@/lib/auth-context';
-import { hasPermission } from '@/lib/rbac';
+
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import type { Driver, DriverStatus, Trip } from '@/lib/types';
 
 export default function DriversPage() {
-  const { user } = useAuth();
+  const { user, hasPermission, canAccessModule } = useAuth();
   const role = user?.role || 'super_admin';
-  const canCreate = hasPermission(role, 'drivers', 'create');
-  const canEdit = hasPermission(role, 'drivers', 'update');
+  const canCreate = hasPermission('drivers', 'create');
+  const canEdit = hasPermission('drivers', 'update');
 
   const [driversList, setDriversList] = useState<Driver[]>([]);
   const [loading, setLoading] = useState(true);

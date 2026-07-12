@@ -23,6 +23,23 @@ function mapRecord(m: any) {
   };
 }
 
+async function sendNotification(toRole: string, fromRole: string, title: string, message: string, type: string, maintenanceId: string | null) {
+  try {
+    const maxIdRes = await query('SELECT id FROM notifications');
+    const ids = maxIdRes.rows.map((r: any) => parseInt(r.id.replace('n', '')) || 0);
+    const newIdNum = ids.length > 0 ? Math.max(...ids) + 1 : 1;
+    const newId = 'n' + newIdNum;
+
+    await query(
+      `INSERT INTO notifications (id, from_role, to_role, title, message, type, read, maintenance_id)
+       VALUES ($1, $2, $3, $4, $5, $6, false, $7)`,
+      [newId, fromRole, toRole, title, message, type, maintenanceId]
+    );
+  } catch (err) {
+    console.error('Failed to send notification:', err);
+  }
+}
+
 export async function GET() {
   try {
     const res = await query('SELECT * FROM maintenance_records ORDER BY id ASC');
@@ -50,9 +67,11 @@ export async function POST(request: Request) {
 
     // Generate new record ID
     const maxIdRes = await query('SELECT id FROM maintenance_records');
-    const ids = maxIdRes.rows.map(r => parseInt(r.id.replace('m', '')) || 0);
+    const ids = maxIdRes.rows.map((r: any) => parseInt(r.id.replace('m', '')) || 0);
     const newIdNum = ids.length > 0 ? Math.max(...ids) + 1 : 1;
     const newId = 'm' + newIdNum;
+
+    const finalApprovalStatus = approvalStatus || 'none';
 
     await query(
       `INSERT INTO maintenance_records (id, vehicle_id, vehicle_reg, type, description, status, priority, scheduled_date, completed_date, cost, technician, invoice_url, actual_cost, vendor, approval_status)
@@ -72,13 +91,25 @@ export async function POST(request: Request) {
         invoiceUrl || null,
         actualCost ? parseInt(actualCost) : null,
         vendor || null,
-        approvalStatus || 'none'
+        finalApprovalStatus,
       ]
     );
 
     // If status is in_progress, change vehicle status to maintenance
     if (status === 'in_progress') {
       await query("UPDATE vehicles SET status = 'maintenance' WHERE id = $1", [vehicleId]);
+    }
+
+    // If submitted for approval (pending), notify Super Admin
+    if (finalApprovalStatus === 'pending' && invoiceUrl) {
+      await sendNotification(
+        'super_admin',
+        'maintenance_manager',
+        `🔧 Invoice Approval Required: ${type}`,
+        `Maintenance Manager has uploaded an invoice for ${type} on vehicle ${vehicleReg}. Vendor: ${vendor || 'N/A'}, Actual Cost: $${actualCost || cost || 0}. Please review and approve or reject.`,
+        'warning',
+        newId
+      );
     }
 
     return NextResponse.json({ success: true, id: newId });
@@ -103,7 +134,7 @@ export async function PUT(request: Request) {
     const cur = currentRes.rows[0];
 
     // Handle Workflow State Transitions
-    let finalApprovalStatus = approvalStatus || cur.approval_status;
+    let finalApprovalStatus = approvalStatus !== undefined ? approvalStatus : cur.approval_status;
     let finalStatus = status || cur.status;
     let completedDate = cur.completed_date;
 
@@ -131,13 +162,61 @@ export async function PUT(request: Request) {
           cur.vehicle_id,
           cur.vehicle_reg,
           'approved',
-          technician || cur.technician || 'System'
+          technician || cur.technician || 'System',
         ]
       );
+
+      // Notify Maintenance Manager of approval
+      await sendNotification(
+        'maintenance_manager',
+        'super_admin',
+        `✅ Maintenance Request Approved`,
+        `Your maintenance request for ${cur.type} on vehicle ${cur.vehicle_reg} has been approved by Super Admin. The expense of $${expenseCost} has been recorded. Status: Completed.`,
+        'success',
+        id
+      );
+
+      // Mark existing super_admin pending notification for this record as read
+      await query(
+        `UPDATE notifications SET read = true WHERE maintenance_id = $1 AND to_role = 'super_admin'`,
+        [id]
+      );
+
     } else if (approvalStatus === 'rejected' && cur.approval_status !== 'rejected') {
       finalApprovalStatus = 'rejected';
       finalStatus = 'scheduled'; // Send back to maintenance manager
       completedDate = null;
+
+      // Notify Maintenance Manager of rejection with comments
+      const rejectReason = rejectionComments || 'No reason provided';
+      await sendNotification(
+        'maintenance_manager',
+        'super_admin',
+        `❌ Maintenance Request Rejected`,
+        `Your maintenance request for ${cur.type} on vehicle ${cur.vehicle_reg} has been rejected by Super Admin. Reason: ${rejectReason}. Please review and resubmit.`,
+        'error',
+        id
+      );
+
+      // Mark existing super_admin pending notification for this record as read
+      await query(
+        `UPDATE notifications SET read = true WHERE maintenance_id = $1 AND to_role = 'super_admin'`,
+        [id]
+      );
+
+    } else if (approvalStatus === 'pending' && cur.approval_status !== 'pending') {
+      // Maintenance manager is submitting/resubmitting for approval with invoice
+      const invoiceToUse = invoiceUrl !== undefined ? invoiceUrl : cur.invoice_url;
+      if (invoiceToUse) {
+        await sendNotification(
+          'super_admin',
+          'maintenance_manager',
+          `🔧 Invoice Approval Required: ${type || cur.type}`,
+          `Maintenance Manager has submitted an invoice for ${type || cur.type} on vehicle ${cur.vehicle_reg}. Vendor: ${vendor || cur.vendor || 'N/A'}, Actual Cost: $${actualCost || cur.actual_cost || cur.cost || 0}. Please review and approve or reject.`,
+          'warning',
+          id
+        );
+      }
     }
 
     let vehicleReg = cur.vehicle_reg;
@@ -167,7 +246,7 @@ export async function PUT(request: Request) {
         vendor !== undefined ? vendor : cur.vendor,
         finalApprovalStatus,
         rejectionComments !== undefined ? rejectionComments : cur.rejection_comments,
-        id
+        id,
       ]
     );
 

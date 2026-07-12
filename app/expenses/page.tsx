@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import { useAuth } from '@/lib/auth-context';
-import { hasPermission } from '@/lib/rbac';
+
 import { toast } from 'sonner';
 
 interface Expense {
@@ -35,10 +35,10 @@ const CATEGORY_COLORS: Record<string, string> = {
 };
 
 export default function ExpensesPage() {
-  const { user } = useAuth();
+  const { user, hasPermission, canAccessModule } = useAuth();
   const role = user?.role || 'super_admin';
-  const canCreate = hasPermission(role, 'expenses', 'create');
-  const canApprove = hasPermission(role, 'expenses', 'approve');
+  const canCreate = hasPermission('expenses', 'create');
+  const canApprove = hasPermission('expenses', 'approve');
 
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);

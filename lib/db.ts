@@ -296,9 +296,15 @@ export async function initializeDatabase() {
         message TEXT NOT NULL,
         type VARCHAR(50) NOT NULL DEFAULT 'info',
         created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-        read BOOLEAN NOT NULL DEFAULT false
+        read BOOLEAN NOT NULL DEFAULT false,
+        maintenance_id VARCHAR(50) DEFAULT NULL
       );
     `);
+    // Add maintenance_id column if it doesn't exist (for existing databases)
+    await client.query(`
+      ALTER TABLE notifications ADD COLUMN IF NOT EXISTS maintenance_id VARCHAR(50) DEFAULT NULL;
+    `);
+
 
     // 8. settings
     await client.query(`

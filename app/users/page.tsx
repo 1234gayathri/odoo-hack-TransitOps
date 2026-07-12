@@ -55,13 +55,12 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useAuth } from '@/lib/auth-context';
-import {
+import { 
   ROLES,
-  hasPermission,
   PERMISSION_MATRIX,
   MODULE_LABELS,
   PERMISSION_LABELS,
-  PERMISSION_COLORS,
+  PERMISSION_COLORS, 
 } from '@/lib/rbac';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -92,11 +91,11 @@ function getRolePermissions(userRole: Role) {
 }
 
 export default function UsersPage() {
-  const { user } = useAuth();
+  const { user, hasPermission, canAccessModule } = useAuth();
   const currentRole = user?.role || 'super_admin';
-  const canCreate = hasPermission(currentRole, 'users', 'create');
-  const canEdit   = hasPermission(currentRole, 'users', 'update');
-  const canDelete = hasPermission(currentRole, 'users', 'delete');
+  const canCreate = hasPermission('users', 'create');
+  const canEdit   = hasPermission('users', 'update');
+  const canDelete = hasPermission('users', 'delete');
 
   const [usersList, setUsersList]         = useState<User[]>([]);
   const [loadingUsers, setLoadingUsers]   = useState(true);

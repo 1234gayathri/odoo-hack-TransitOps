@@ -13,6 +13,7 @@ import {
   Filter,
   Send,
   Loader2,
+  Wrench,
 } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/dashboard-layout';
 import { PageHeader, EmptyState } from '@/components/shared/page-components';
@@ -47,6 +48,7 @@ interface AppNotification {
   type: 'success' | 'warning' | 'error' | 'info';
   timestamp: string;
   read: boolean;
+  maintenanceId: string | null;
 }
 
 const ROLES = [
@@ -76,6 +78,12 @@ export default function NotificationsPage() {
     type: 'info'
   });
   const [composeLoading, setComposeLoading] = useState(false);
+
+  // Maintenance approval state
+  const [approvalLoading, setApprovalLoading] = useState<string | null>(null);
+  const [rejectId, setRejectId] = useState<string | null>(null);
+  const [rejectionComment, setRejectionComment] = useState('');
+  const [rejectLoading, setRejectLoading] = useState(false);
 
   const fetchNotifications = async () => {
     try {
@@ -149,6 +157,71 @@ export default function NotificationsPage() {
       }
     } catch (err) {
       toast.error('Failed to dismiss notification');
+    }
+  };
+
+  const handleApproveMaintenance = async (maintenanceId: string, notifId: string) => {
+    setApprovalLoading(notifId);
+    try {
+      const res = await fetch('/api/maintenance', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: maintenanceId, approvalStatus: 'approved' }),
+      });
+      if (res.ok) {
+        toast.success('✅ Maintenance Approved!', {
+          description: 'Expense recorded. Maintenance Manager has been notified.'
+        });
+        fetchNotifications();
+      } else {
+        const data = await res.json();
+        toast.error('Approval failed', { description: data.error });
+      }
+    } catch (err: any) {
+      toast.error('Network error', { description: err.message });
+    } finally {
+      setApprovalLoading(null);
+    }
+  };
+
+  const handleRejectMaintenance = async () => {
+    if (!rejectId) return;
+    if (!rejectionComment.trim()) {
+      toast.error('Please enter rejection comments');
+      return;
+    }
+    setRejectLoading(true);
+    try {
+      const notif = notifications.find(n => n.id === rejectId);
+      const maintenanceId = notif?.maintenanceId;
+      if (!maintenanceId) {
+        toast.error('Cannot find maintenance record for this notification');
+        return;
+      }
+      const res = await fetch('/api/maintenance', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: maintenanceId,
+          approvalStatus: 'rejected',
+          rejectionComments: rejectionComment,
+        }),
+      });
+      if (res.ok) {
+        toast.success('❌ Maintenance Rejected', {
+          description: 'Maintenance Manager has been notified with your comments.'
+        });
+        setRejectId(null);
+        setRejectionComment('');
+        fetchNotifications();
+      } else {
+        const data = await res.json();
+        toast.error('Rejection failed', { description: data.error });
+      }
+    } catch (err: any) {
+      toast.error('Network error', { description: err.message });
+    } finally {
+      setRejectLoading(false);
     }
   };
 
@@ -303,6 +376,41 @@ export default function NotificationsPage() {
                             <p className="text-xs text-muted-foreground mt-1.5">
                               {formatTimestamp(n.timestamp)}
                             </p>
+
+                            {/* Approve/Reject buttons for Super Admin on maintenance notifications */}
+                            {isSuperAdmin && n.maintenanceId && !n.read && (
+                              <div className="flex items-center gap-2 mt-3">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="border-destructive/40 text-destructive hover:bg-destructive/10 gap-1.5 h-8"
+                                  onClick={() => setRejectId(n.id)}
+                                  disabled={approvalLoading === n.id}
+                                >
+                                  <XCircle className="w-3.5 h-3.5" /> Reject
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  className="bg-green-600 hover:bg-green-700 text-white gap-1.5 h-8"
+                                  onClick={() => handleApproveMaintenance(n.maintenanceId!, n.id)}
+                                  disabled={approvalLoading === n.id}
+                                >
+                                  {approvalLoading === n.id ? (
+                                    <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Approving...</>
+                                  ) : (
+                                    <><CheckCircle2 className="w-3.5 h-3.5" /> Approve</>
+                                  )}
+                                </Button>
+                              </div>
+                            )}
+
+                            {/* Show maintenance badge for already acted-upon notifications */}
+                            {n.maintenanceId && n.read && (
+                              <div className="flex items-center gap-1 mt-2">
+                                <Wrench className="w-3 h-3 text-muted-foreground" />
+                                <span className="text-[10px] text-muted-foreground">Maintenance Request (Action Taken)</span>
+                              </div>
+                            )}
                           </div>
 
                           {/* Actions */}
@@ -407,6 +515,40 @@ export default function NotificationsPage() {
             <Button variant="outline" onClick={() => setComposeOpen(false)} disabled={composeLoading}>Cancel</Button>
             <Button onClick={handleBroadcast} disabled={composeLoading}>
               {composeLoading ? 'Sending...' : 'Send Broadcast'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Rejection Comment Dialog */}
+      <Dialog open={!!rejectId} onOpenChange={(v) => !v && (setRejectId(null), setRejectionComment(''))}>
+        <DialogContent className="sm:max-w-[450px]">
+          <DialogHeader>
+            <DialogTitle>Reject Maintenance Request</DialogTitle>
+            <DialogDescription>
+              Provide feedback to the Maintenance Manager explaining why this invoice was rejected.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-3">
+            <Label htmlFor="reject-comments">Rejection Comments *</Label>
+            <textarea
+              id="reject-comments"
+              className="flex min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 mt-1.5"
+              placeholder="e.g. The actual cost is higher than estimated without explanation. Please attach a correct workshop breakdown."
+              value={rejectionComment}
+              onChange={(e) => setRejectionComment(e.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setRejectId(null); setRejectionComment(''); }} disabled={rejectLoading}>
+              Cancel
+            </Button>
+            <Button
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={handleRejectMaintenance}
+              disabled={rejectLoading}
+            >
+              {rejectLoading ? 'Rejecting...' : 'Confirm Rejection'}
             </Button>
           </DialogFooter>
         </DialogContent>

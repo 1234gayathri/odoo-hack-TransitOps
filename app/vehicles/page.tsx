@@ -66,7 +66,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useAuth } from '@/lib/auth-context';
-import { hasPermission } from '@/lib/rbac';
+
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import type { Vehicle, FuelType, VehicleStatus } from '@/lib/types';
@@ -75,11 +75,11 @@ type SortKey = 'registration' | 'make' | 'year' | 'odometer' | 'healthScore';
 type SortDir = 'asc' | 'desc';
 
 export default function VehiclesPage() {
-  const { user } = useAuth();
+  const { user, hasPermission, canAccessModule } = useAuth();
   const role = user?.role || 'super_admin';
-  const canCreate = hasPermission(role, 'vehicles', 'create');
-  const canEdit = hasPermission(role, 'vehicles', 'update');
-  const canDelete = hasPermission(role, 'vehicles', 'delete');
+  const canCreate = hasPermission('vehicles', 'create');
+  const canEdit = hasPermission('vehicles', 'update');
+  const canDelete = hasPermission('vehicles', 'delete');
 
   const [vehiclesList, setVehiclesList] = useState<Vehicle[]>([]);
   const [loading, setLoading] = useState(true);

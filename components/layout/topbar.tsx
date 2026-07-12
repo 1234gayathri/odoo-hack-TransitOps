@@ -43,9 +43,9 @@ import {
   CommandShortcut,
 } from '@/components/ui/command';
 import { useAuth } from '@/lib/auth-context';
-import { canAccessModule, ROLES } from '@/lib/rbac';
+import { ROLES } from '@/lib/rbac';
 import type { ModuleKey } from '@/lib/types';
-import { notifications as allNotifications } from '@/lib/mock-data';
+
 import { cn } from '@/lib/utils';
 
 const COMMAND_ITEMS: { key: ModuleKey; label: string; icon: any }[] = [
@@ -81,7 +81,7 @@ interface TopbarProps {
 
 export function Topbar({ onMenuClick, onExpandSidebar, collapsed }: TopbarProps) {
   const router = useRouter();
-  const { user, logout } = useAuth();
+  const { user, hasPermission, canAccessModule, logout } = useAuth();
   const { theme, setTheme } = useTheme();
   const [commandOpen, setCommandOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -100,8 +100,9 @@ export function Topbar({ onMenuClick, onExpandSidebar, collapsed }: TopbarProps)
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  const accessibleItems = COMMAND_ITEMS.filter((i) => i.key === 'profile' || canAccessModule(role, i.key));
-  const unread = allNotifications.filter((n) => !n.read);
+  const accessibleItems = COMMAND_ITEMS.filter((i) => i.key === 'profile' || canAccessModule(i.key));
+  // Temporarily disable unread notifications counter in topbar since it was using mock data
+  const unreadCount = 0;
 
   return (
     <>
@@ -154,7 +155,7 @@ export function Topbar({ onMenuClick, onExpandSidebar, collapsed }: TopbarProps)
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon" className="relative">
                   <Bell className="w-[18px] h-[18px]" />
-                  {unread.length > 0 && (
+                  {unreadCount > 0 && (
                     <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-destructive ring-2 ring-background" />
                   )}
                 </Button>
@@ -162,22 +163,12 @@ export function Topbar({ onMenuClick, onExpandSidebar, collapsed }: TopbarProps)
               <DropdownMenuContent align="end" className="w-80 p-0">
                 <div className="flex items-center justify-between px-3 py-2.5 border-b">
                   <span className="font-semibold text-sm">Notifications</span>
-                  <Badge variant="secondary" className="text-[10px]">{unread.length} new</Badge>
+                  <Badge variant="secondary" className="text-[10px]">{unreadCount} new</Badge>
                 </div>
                 <div className="max-h-[320px] overflow-y-auto scrollbar-thin">
-                  {allNotifications.slice(0, 5).map((n) => {
-                    const { icon: Icon, color } = NOTIF_ICONS[n.type];
-                    return (
-                      <div key={n.id} className={cn('flex gap-3 px-3 py-2.5 border-b last:border-0 hover:bg-accent cursor-pointer', !n.read && 'bg-primary/5')}>
-                        <Icon className={cn('w-4 h-4 mt-0.5 shrink-0', color)} />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium">{n.title}</p>
-                          <p className="text-xs text-muted-foreground line-clamp-2">{n.message}</p>
-                        </div>
-                        {!n.read && <span className="w-2 h-2 rounded-full bg-primary shrink-0 mt-1.5" />}
-                      </div>
-                    );
-                  })}
+                  <div className="p-4 text-center text-sm text-muted-foreground">
+                    Go to Notifications page to view all alerts.
+                  </div>
                 </div>
                 <div className="p-2 border-t">
                   <Button variant="ghost" size="sm" className="w-full text-xs" onClick={() => router.push('/notifications')}>

@@ -78,7 +78,7 @@ import {
 } from '@/components/ui/select';
 import type { Trip, TripStatus, Driver, Vehicle } from '@/lib/types';
 import { useAuth } from '@/lib/auth-context';
-import { hasPermission } from '@/lib/rbac';
+
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
@@ -148,11 +148,11 @@ function toIso(local: string): string {
 }
 
 export default function TripsPage() {
-  const { user } = useAuth();
+  const { user, hasPermission, canAccessModule } = useAuth();
   const role = user?.role || 'super_admin';
-  const canCreate = hasPermission(role, 'trips', 'create');
-  const canEdit = hasPermission(role, 'trips', 'update');
-  const canDelete = hasPermission(role, 'trips', 'delete');
+  const canCreate = hasPermission('trips', 'create');
+  const canEdit = hasPermission('trips', 'update');
+  const canDelete = hasPermission('trips', 'delete');
 
   const [view, setView] = useState<ViewMode>('kanban');
   const [search, setSearch] = useState('');

@@ -55,10 +55,9 @@ const PERMISSION_ICON: Record<Permission, any> = {
 };
 
 export default function RolesPage() {
-  const { user } = useAuth();
+  const { user, matrix, setMatrix } = useAuth();
   const isSuperAdmin = user?.role === 'super_admin';
 
-  const [matrix, setMatrix] = useState<Record<Role, Partial<Record<ModuleKey, Permission>>>>(PERMISSION_MATRIX);
   const [loading, setLoading] = useState(true);
 
   // Fetch permission matrix from backend
@@ -69,7 +68,6 @@ export default function RolesPage() {
       const data = await res.json();
       if (res.ok && data.permissions) {
         setMatrix(data.permissions);
-        localStorage.setItem('transitops-permissions', JSON.stringify(data.permissions));
       }
     } catch (err: any) {
       toast.error('Failed to load permissions', { description: err.message });
@@ -101,7 +99,6 @@ export default function RolesPage() {
         },
       };
       setMatrix(updatedMatrix);
-      localStorage.setItem('transitops-permissions', JSON.stringify(updatedMatrix));
 
       const res = await fetch('/api/roles/permissions', {
         method: 'POST',

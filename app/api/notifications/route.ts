@@ -11,6 +11,7 @@ function mapNotif(n: any) {
     type: n.type,
     timestamp: n.created_at,
     read: n.read === true || n.read === 'true' || n.read === 1,
+    maintenanceId: n.maintenance_id || null,
   };
 }
 
@@ -39,7 +40,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { title, message, toRole, type } = body;
+    const { title, message, toRole, type, fromRole, maintenanceId } = body;
 
     if (!title || !message || !toRole) {
       return NextResponse.json({ error: 'Missing required notification fields' }, { status: 400 });
@@ -52,19 +53,20 @@ export async function POST(request: Request) {
     const newId = 'n' + newIdNum;
 
     await query(
-      `INSERT INTO notifications (id, from_role, to_role, title, message, type, read)
-       VALUES ($1, $2, $3, $4, $5, $6, false)`,
+      `INSERT INTO notifications (id, from_role, to_role, title, message, type, read, maintenance_id)
+       VALUES ($1, $2, $3, $4, $5, $6, false, $7)`,
       [
         newId,
-        'super_admin',
+        fromRole || 'system',
         toRole,
         title.trim(),
         message.trim(),
-        type || 'info'
+        type || 'info',
+        maintenanceId || null,
       ]
     );
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, id: newId });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
