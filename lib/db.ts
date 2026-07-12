@@ -14,14 +14,19 @@ export interface User {
 
 export type PermissionMatrix = Record<Role, Partial<Record<ModuleKey, Permission>>>;
 
-const pool = new Pool({
-  host: '127.0.0.1',
-  port: 5435,
-  user: 'postgres',
-  database: 'postgres',
-  max: 10,
-  idleTimeoutMillis: 30000,
-});
+const pool = process.env.DATABASE_URL
+  ? new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false }
+    })
+  : new Pool({
+      host: '127.0.0.1',
+      port: 5435,
+      user: 'postgres',
+      database: 'postgres',
+      max: 10,
+      idleTimeoutMillis: 30000,
+    });
 
 let isInitialized = false;
 
@@ -132,6 +137,7 @@ const INITIAL_PERMISSIONS: PermissionMatrix = {
 
 // Ensure server is running or start it automatically
 async function ensurePostgresRunning() {
+  if (process.env.DATABASE_URL) return;
   try {
     const client = await pool.connect();
     client.release();
